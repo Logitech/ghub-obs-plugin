@@ -196,7 +196,7 @@ void logi::applets::obs_plugin::_run_forever(void)
         ws_client::connection_ptr connection = _create_connection();
         if (connection)
         {
-            m_websocket.connect(connection);
+            auto conn = m_websocket.connect(connection);
         }
     }
     m_websocket.run();
@@ -1605,15 +1605,15 @@ void logi::applets::obs_plugin::loop_function()
         if (nullptr != obs_output)
         {
             // Calculate bitrate
-            int32_t streamed_bytes = obs_output_get_total_bytes(obs_output);
+            int32_t streamed_bytes = static_cast<int32_t>(obs_output_get_total_bytes(obs_output));
             int32_t bytes_per_second = streamed_bytes - m_total_streamed_bytes;
-            bps = (bytes_per_second / 1000) * 8; // Bytes/s converted to KiloBytes/s then converted to Kilobits/s
+            bps = (static_cast<double_t>(bytes_per_second) / 1000) * 8; // Bytes/s converted to KiloBytes/s then converted to Kilobits/s
 
             m_total_streamed_bytes = streamed_bytes;
 
             // Calculate framerate
             int32_t streamed_frames = obs_output_get_total_frames(obs_output);
-            fps = streamed_frames - m_total_streamed_frames;
+            fps = static_cast<double_t>(streamed_frames) - static_cast<double_t>(m_total_streamed_frames);
 
             m_total_streamed_frames = streamed_frames;
         }

@@ -69,3 +69,7 @@ target_include_directories(logi_applets_obs_plugin
 
 target_link_libraries(logi_applets_obs_plugin
     ${LIBS})
+
+if(LGHUB_BACKEND_TARGET)
+    configure_warning_suppression(logi_applets_obs_plugin PRIVATE)
+endif()

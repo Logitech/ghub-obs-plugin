@@ -4,9 +4,12 @@
 #define ASIO_STANDALONE
 #define _WEBSOCKETPP_CPP11_TYPE_TRAITS_
 
+#pragma warning(push)
+#pragma warning(disable: 4267)
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_no_tls_client.hpp>
 #include <nlohmann/json.hpp>
+#pragma warning(pop)
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -43,6 +46,8 @@ namespace logi
                 std::string name;
                 bool new_state;
                 bool is_toggle;
+                new_state_info() : name(std::string()), new_state(false), is_toggle(false)
+                { }
             };
 
             bool connect();

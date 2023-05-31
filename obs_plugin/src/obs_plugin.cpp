@@ -1,7 +1,8 @@
 #include "obs_plugin.hpp"
+
+#include <UI/obs-frontend-api/obs-frontend-api.h>
 #include <libobs/obs-module.h>
 #include <libobs/util/platform.h>
-#include <UI/obs-frontend-api/obs-frontend-api.h>
 
 using namespace logi::applets::obs_plugin;
 
@@ -47,24 +48,20 @@ static void handle_obs_frontend_save(obs_data_t *save_data, bool saving, void *)
 
 static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 {
-    if (event == OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED ||
-        event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
-        event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_LIST_CHANGED ||
-        event == OBS_FRONTEND_EVENT_SCENE_CHANGED)
+    if (event == OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED
+        || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_CHANGED)
     {
         helper_populate_collections();
         register_parameter_actions();
     }
-    else if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED ||
-        event == OBS_FRONTEND_EVENT_RECORDING_STARTED)
+    else if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED || event == OBS_FRONTEND_EVENT_RECORDING_STARTED)
     {
         std::lock_guard<std::mutex> wlock(m_thread_lock);
         m_start_time = std::chrono::high_resolution_clock::now();
         m_total_streamed_bytes = 0;
         m_total_streamed_frames = 0;
     }
-    else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED ||
-        event == OBS_FRONTEND_EVENT_RECORDING_STOPPED)
+    else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED || event == OBS_FRONTEND_EVENT_RECORDING_STOPPED)
     {
         std::lock_guard<std::mutex> wlock(m_thread_lock);
         m_total_streamed_bytes = 0;
@@ -215,7 +212,8 @@ ws_client::connection_ptr logi::applets::obs_plugin::_create_connection(void)
     }
 
     connection->set_open_handler(std::bind(&websocket_open_handler, std::placeholders::_1));
-    connection->set_message_handler(std::bind(&websocket_message_handler, std::placeholders::_1, std::placeholders::_2));
+    connection->set_message_handler(
+        std::bind(&websocket_message_handler, std::placeholders::_1, std::placeholders::_2));
     connection->set_close_handler(std::bind(&websocket_close_handler, std::placeholders::_1));
     connection->set_fail_handler(std::bind(&websocket_fail_handler, std::placeholders::_1));
 
@@ -240,7 +238,8 @@ void logi::applets::obs_plugin::websocket_open_handler(websocketpp::connection_h
 }
 
 
-void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connection_hdl connection_handle, ws_client::message_ptr response)
+void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connection_hdl connection_handle,
+                                                          ws_client::message_ptr response)
 {
     /* Received a message, handle it */
     std::string payload = response->get_payload();
@@ -257,8 +256,8 @@ void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connectio
                 return;
             }
 
-            if ((message["verb"].get<std::string>() == "BROADCAST") &&
-                (message["path"].get<std::string>() == "/api/v1/integration/sdk/action/invoke"))
+            if ((message["verb"].get<std::string>() == "BROADCAST")
+                && (message["path"].get<std::string>() == "/api/v1/integration/sdk/action/invoke"))
             {
                 auto invoked_action = message["payload"];
 
@@ -368,8 +367,8 @@ void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connectio
                     }
                 }
             }
-            else if ((message["verb"].get<std::string>() == "SET") &&
-                     (message["path"].get<std::string>() == "/api/v1/integration/activate"))
+            else if ((message["verb"].get<std::string>() == "SET")
+                     && (message["path"].get<std::string>() == "/api/v1/integration/activate"))
             {
                 auto instance_info_payload = message["payload"];
 
@@ -378,8 +377,8 @@ void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connectio
                     std::string new_integration_guid = instance_info_payload["integrationGuid"].get<std::string>();
                     std::string new_integration_instance = instance_info_payload["instanceGuid"].get<std::string>();
 
-                    if (m_integration_guid.empty() && !new_integration_guid.empty() &&
-                        m_integration_instance.empty() && !new_integration_instance.empty())
+                    if (m_integration_guid.empty() && !new_integration_guid.empty() && m_integration_instance.empty()
+                        && !new_integration_instance.empty())
                     {
                         m_integration_guid = new_integration_guid;
                         m_integration_instance = new_integration_instance;
@@ -506,7 +505,9 @@ void logi::applets::obs_plugin::uninitialize_actions()
 }
 
 
-nlohmann::json logi::applets::obs_plugin::register_action(std::string action_id, std::string action_name, action_parameters parameters)
+nlohmann::json logi::applets::obs_plugin::register_action(std::string action_id,
+                                                          std::string action_name,
+                                                          action_parameters parameters)
 {
     // clang-format off
     nlohmann::json action =
@@ -918,7 +919,8 @@ void logi::applets::obs_plugin::action_scene_activate(action_invoke_parameters p
 
     obs_frontend_source_list scenes = {};
     obs_frontend_get_scenes(&scenes);
-    for (size_t i = 0; i < scenes.sources.num; i++) {
+    for (size_t i = 0; i < scenes.sources.num; i++)
+    {
         obs_source_t *source = scenes.sources.array[i];
         const char *name = obs_source_get_name(source);
         std::string str_name = std::string(name);
@@ -1100,7 +1102,7 @@ void logi::applets::obs_plugin::helper_desktop_mute(bool new_state, bool is_togg
     // Iterate over channels attempting to set mute
     for (int channel = 1; channel <= 2; channel++)
     {
-        obs_source_t* sceneUsed = obs_get_output_source(channel);
+        obs_source_t *sceneUsed = obs_get_output_source(channel);
         if (sceneUsed)
         {
             if (is_toggle)
@@ -1130,7 +1132,7 @@ void logi::applets::obs_plugin::helper_mic_mute(bool new_state, bool is_toggle)
     // Iterate over channels attempting to set mute
     for (int channel = 3; channel <= 5; channel++)
     {
-        obs_source_t* sceneUsed = obs_get_output_source(channel);
+        obs_source_t *sceneUsed = obs_get_output_source(channel);
         if (sceneUsed)
         {
             if (is_toggle)
@@ -1155,11 +1157,15 @@ void logi::applets::obs_plugin::helper_mic_mute(bool new_state, bool is_toggle)
 }
 
 
-void logi::applets::obs_plugin::helper_source_activate(std::string scene_name, std::string source_name, bool new_state, bool is_toggle)
+void logi::applets::obs_plugin::helper_source_activate(std::string scene_name,
+                                                       std::string source_name,
+                                                       bool new_state,
+                                                       bool is_toggle)
 {
     obs_frontend_source_list scenes = {};
     obs_frontend_get_scenes(&scenes);
-    for (size_t i = 0; i < scenes.sources.num; i++) {
+    for (size_t i = 0; i < scenes.sources.num; i++)
+    {
         obs_source_t *source = scenes.sources.array[i];
         const char *name = obs_source_get_name(source);
         std::string str_name = std::string(name);
@@ -1172,8 +1178,8 @@ void logi::applets::obs_plugin::helper_source_activate(std::string scene_name, s
             state->new_state = new_state;
             state->is_toggle = is_toggle;
 
-            auto sourceEnumProc = [](obs_scene_t* scene, obs_sceneitem_t* currentItem, void* privateData) -> bool {
-                new_state_info* parameters = (new_state_info*)privateData;
+            auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
+                new_state_info *parameters = (new_state_info *)privateData;
                 obs_source_t *source = obs_sceneitem_get_source(currentItem);
                 uint32_t source_type = obs_source_get_output_flags(source);
                 std::string str_source_name = std::string(obs_source_get_name(source));
@@ -1209,11 +1215,15 @@ void logi::applets::obs_plugin::helper_source_activate(std::string scene_name, s
 }
 
 
-void logi::applets::obs_plugin::helper_mixer_mute(std::string scene_name, std::string mixer_name, bool new_state, bool is_toggle)
+void logi::applets::obs_plugin::helper_mixer_mute(std::string scene_name,
+                                                  std::string mixer_name,
+                                                  bool new_state,
+                                                  bool is_toggle)
 {
     obs_frontend_source_list scenes = {};
     obs_frontend_get_scenes(&scenes);
-    for (size_t i = 0; i < scenes.sources.num; i++) {
+    for (size_t i = 0; i < scenes.sources.num; i++)
+    {
         obs_source_t *source = scenes.sources.array[i];
         const char *name = obs_source_get_name(source);
         std::string str_name = std::string(name);
@@ -1226,8 +1236,8 @@ void logi::applets::obs_plugin::helper_mixer_mute(std::string scene_name, std::s
             state->new_state = new_state;
             state->is_toggle = is_toggle;
 
-            auto sourceEnumProc = [](obs_scene_t* scene, obs_sceneitem_t* currentItem, void* privateData) -> bool {
-                new_state_info* parameters = (new_state_info*)privateData;
+            auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
+                new_state_info *parameters = (new_state_info *)privateData;
                 obs_source_t *source = obs_sceneitem_get_source(currentItem);
                 uint32_t source_type = obs_source_get_output_flags(source);
                 std::string str_source_name = std::string(obs_source_get_name(source));
@@ -1301,7 +1311,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_scenes()
 {
     action_parameters available_scenes;
 
-    char* current_collection = obs_frontend_get_current_scene_collection();
+    char *current_collection = obs_frontend_get_current_scene_collection();
     std::string current_collection_str = std::string(current_collection);
     auto collection = m_obs_collections[current_collection_str];
     bfree(current_collection);
@@ -1340,7 +1350,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_sources()
 {
     action_parameters available_scenes;
 
-    char* current_collection = obs_frontend_get_current_scene_collection();
+    char *current_collection = obs_frontend_get_current_scene_collection();
     std::string current_collection_str = std::string(current_collection);
     auto collection = m_obs_collections[current_collection_str];
     bfree(current_collection);
@@ -1402,7 +1412,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
 {
     action_parameters available_scenes;
 
-    char* current_collection = obs_frontend_get_current_scene_collection();
+    char *current_collection = obs_frontend_get_current_scene_collection();
     std::string current_collection_str = std::string(current_collection);
     auto collection = m_obs_collections[current_collection_str];
     bfree(current_collection);
@@ -1468,13 +1478,13 @@ void logi::applets::obs_plugin::helper_populate_collections()
         return;
     }
 
-    char* current_collection = obs_frontend_get_current_scene_collection();
+    char *current_collection = obs_frontend_get_current_scene_collection();
 
-    char** collection_names_orig = obs_frontend_get_scene_collections();
-    char** collection_names = collection_names_orig;
+    char **collection_names_orig = obs_frontend_get_scene_collections();
+    char **collection_names = collection_names_orig;
 
     // Initialize all collection names
-    for (char* collection_name = *collection_names; collection_name; collection_name = *++collection_names)
+    for (char *collection_name = *collection_names; collection_name; collection_name = *++collection_names)
     {
         m_obs_collections[std::string(collection_name)];
     }
@@ -1485,23 +1495,24 @@ void logi::applets::obs_plugin::helper_populate_collections()
 
     obs_frontend_source_list scenes = {};
     obs_frontend_get_scenes(&scenes);
-    for (size_t i = 0; i < scenes.sources.num; i++) {
+    for (size_t i = 0; i < scenes.sources.num; i++)
+    {
         obs_source_t *source = scenes.sources.array[i];
         const char *name = obs_source_get_name(source);
         obs_scene_t *scene = obs_scene_from_source(source);
-        scene_info* obs_scenes = new scene_info;
+        scene_info *obs_scenes = new scene_info;
 
         m_obs_collections[std::string(current_collection)][std::string(name)].sources.clear();
 
-        auto sourceEnumProc = [](obs_scene_t* scene, obs_sceneitem_t* currentItem, void* privateData) -> bool {
-            scene_info* parameters = (scene_info*)privateData;
+        auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
+            scene_info *parameters = (scene_info *)privateData;
 
             obs_source_t *source = obs_sceneitem_get_source(currentItem);
 
             uint32_t source_type = obs_source_get_output_flags(source);
 
-            if (((source_type & OBS_SOURCE_VIDEO) == OBS_SOURCE_VIDEO) ||
-                ((source_type & OBS_SOURCE_ASYNC) == OBS_SOURCE_ASYNC))
+            if (((source_type & OBS_SOURCE_VIDEO) == OBS_SOURCE_VIDEO)
+                || ((source_type & OBS_SOURCE_ASYNC) == OBS_SOURCE_ASYNC))
             {
                 parameters->sources.push_back(std::string(obs_source_get_name(source)));
             }
@@ -1626,7 +1637,7 @@ void logi::applets::obs_plugin::loop_function()
             obs_output = obs_frontend_get_streaming_output();
             new_status["payload"]["currentState"] = "STREAMING";
         }
-        else if(obs_frontend_recording_active())
+        else if (obs_frontend_recording_active())
         {
             obs_output = obs_frontend_get_recording_output();
             new_status["payload"]["currentState"] = "RECORDING";
@@ -1643,7 +1654,8 @@ void logi::applets::obs_plugin::loop_function()
             // Calculate bitrate
             int32_t streamed_bytes = static_cast<int32_t>(obs_output_get_total_bytes(obs_output));
             int32_t bytes_per_second = streamed_bytes - m_total_streamed_bytes;
-            bps = (static_cast<double_t>(bytes_per_second) / 1000) * 8; // Bytes/s converted to KiloBytes/s then converted to Kilobits/s
+            bps = (static_cast<double_t>(bytes_per_second) / 1000)
+                  * 8;  // Bytes/s converted to KiloBytes/s then converted to Kilobits/s
 
             m_total_streamed_bytes = streamed_bytes;
 

@@ -5,21 +5,21 @@
 #define _WEBSOCKETPP_CPP11_TYPE_TRAITS_
 
 #pragma warning(push)
-#pragma warning(disable: 4267)
+#pragma warning(disable : 4267)
+#include <nlohmann/json.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_no_tls_client.hpp>
-#include <nlohmann/json.hpp>
 #pragma warning(pop)
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
-#include <thread>
-#include <string>
-#include <vector>
 #include <map>
 #include <mutex>
 #include <queue>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace logi
 {
@@ -27,27 +27,30 @@ namespace logi
     {
         namespace obs_plugin
         {
-            using ws_client                     = websocketpp::client<websocketpp::config::asio_client>;
-            using action_parameters             = std::vector<nlohmann::json>;
-            using action_invoke_parameters      = std::map<std::string, std::string>;
+            using ws_client = websocketpp::client<websocketpp::config::asio_client>;
+            using action_parameters = std::vector<nlohmann::json>;
+            using action_invoke_parameters = std::map<std::string, std::string>;
 
-            using sources                       = std::vector<std::string>;
-            using mixers                        = std::vector<std::string>;
+            using sources = std::vector<std::string>;
+            using mixers = std::vector<std::string>;
 
-            struct scene_info {
-                mixers      mixers;
-                sources     sources;
+            struct scene_info
+            {
+                mixers mixers;
+                sources sources;
             };
 
-            using scenes                        = std::map<std::string, scene_info>;
-            using collection_to_scenes          = std::map<std::string, scenes>;
+            using scenes = std::map<std::string, scene_info>;
+            using collection_to_scenes = std::map<std::string, scenes>;
 
-            struct new_state_info {
+            struct new_state_info
+            {
                 std::string name;
                 bool new_state;
                 bool is_toggle;
                 new_state_info() : name(std::string()), new_state(false), is_toggle(false)
-                { }
+                {
+                }
             };
 
             bool connect();
@@ -58,7 +61,8 @@ namespace logi
             ws_client::connection_ptr _create_connection(void);
 
             void websocket_open_handler(websocketpp::connection_hdl connection_handle);
-            void websocket_message_handler(websocketpp::connection_hdl connection_handle, ws_client::message_ptr response);
+            void websocket_message_handler(websocketpp::connection_hdl connection_handle,
+                                           ws_client::message_ptr response);
             void websocket_close_handler(websocketpp::connection_hdl connection_handle);
             void websocket_fail_handler(websocketpp::connection_hdl connection_handle);
 
@@ -66,7 +70,9 @@ namespace logi
 
             bool initialize_actions();
             void uninitialize_actions();
-            nlohmann::json register_action(std::string action_id, std::string action_name, action_parameters arguments = action_parameters());
+            nlohmann::json register_action(std::string action_id,
+                                           std::string action_name,
+                                           action_parameters arguments = action_parameters());
             bool register_actions_broadcast();
             void register_regular_actions();
             void register_parameter_actions();
@@ -101,7 +107,10 @@ namespace logi
             // Action helpers
             void helper_desktop_mute(bool new_state, bool is_toggle);
             void helper_mic_mute(bool new_state, bool is_toggle);
-            void helper_source_activate(std::string scene_name, std::string source_name, bool new_state, bool is_toggle);
+            void helper_source_activate(std::string scene_name,
+                                        std::string source_name,
+                                        bool new_state,
+                                        bool is_toggle);
             void helper_mixer_mute(std::string scene_name, std::string mixer_name, bool new_state, bool is_toggle);
             action_parameters helper_get_available_collections();
             action_parameters helper_get_available_scenes();
@@ -131,7 +140,7 @@ namespace logi
 
             std::mutex m_compressor_ready_mutex;
             std::condition_variable m_compressor_ready_cv;
-            static const long m_update_interval = 1000 / 1; // 1 fps
+            static const long m_update_interval = 1000 / 1;  // 1 fps
 
             std::mutex m_thread_lock;
 
@@ -161,7 +170,7 @@ namespace logi
             const std::string s_integration_icon_2          = "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";
             // clang-format on
 
-            collection_to_scenes m_obs_collections; // [Collection Name] = {[Scene Name] = {Source Name}}
+            collection_to_scenes m_obs_collections;  // [Collection Name] = {[Scene Name] = {Source Name}}
 
             // clang-format off
             namespace actions

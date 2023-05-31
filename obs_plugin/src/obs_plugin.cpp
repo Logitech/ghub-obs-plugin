@@ -427,6 +427,7 @@ bool logi::applets::obs_plugin::register_integration()
         return false;
     }
 
+    // clang-format off
     nlohmann::json register_app =
     {
         { "path", "/api/v1/integration/register" },
@@ -442,6 +443,7 @@ bool logi::applets::obs_plugin::register_integration()
             }
         }
     };
+    // clang-format on
 
     return send_message(register_app);
 }
@@ -454,6 +456,7 @@ bool logi::applets::obs_plugin::initialize_actions()
         return false;
     }
 
+    // clang-format off
     nlohmann::json initalize_actions =
     {
         { "path", "/api/v1/integration/activate" },
@@ -465,6 +468,7 @@ bool logi::applets::obs_plugin::initialize_actions()
             }
         }
     };
+    // clang-format on
 
     send_message(initalize_actions);
 
@@ -483,6 +487,7 @@ void logi::applets::obs_plugin::uninitialize_actions()
         return;
     }
 
+    // clang-format off
     nlohmann::json uninitalize_actions =
     {
         { "path", "/api/v1/integration/deactivate" },
@@ -495,6 +500,7 @@ void logi::applets::obs_plugin::uninitialize_actions()
             }
         }
     };
+    // clang-format on
 
     send_message(uninitalize_actions);
 }
@@ -502,12 +508,14 @@ void logi::applets::obs_plugin::uninitialize_actions()
 
 nlohmann::json logi::applets::obs_plugin::register_action(std::string action_id, std::string action_name, action_parameters parameters)
 {
+    // clang-format off
     nlohmann::json action =
     {
         { "actionId", action_id },
         { "name", action_name },
         { "parameters", parameters }
     };
+    // clang-format on
 
     return action;
 }
@@ -520,11 +528,13 @@ bool logi::applets::obs_plugin::register_actions_broadcast()
         return false;
     }
 
+    // clang-format off
     nlohmann::json message =
     {
         { "path", "/api/v1/integration/sdk/action/invoke" },
         { "verb", "SUBSCRIBE" }
     };
+    // clang-format on
 
     return send_message(message);
 }
@@ -555,6 +565,7 @@ void logi::applets::obs_plugin::register_regular_actions()
     actions.push_back(register_action(actions::s_mic_unmute, "APPLET_OBS_MIC_UNMUTE"));
     actions.push_back(register_action(actions::s_mic_mute_toggle, "APPLET_OBS_MIC_MUTE_TOGGLE"));
 
+    // clang-format off
     nlohmann::json register_actions =
     {
         { "path", "/api/v1/actions/register" },
@@ -571,6 +582,7 @@ void logi::applets::obs_plugin::register_regular_actions()
             }
         }
     };
+    // clang-format on
 
     std::string new_actions = register_actions.dump();
 
@@ -610,6 +622,7 @@ void logi::applets::obs_plugin::register_parameter_actions()
     actions.push_back(register_action(actions::s_mixer_unmute, "APPLET_OBS_MIXER_UNMUTE", mixers));
     actions.push_back(register_action(actions::s_mixer_mute_toggle, "APPLET_OBS_MIXER_MUTE_TOGGLE", mixers));
 
+    // clang-format off
     nlohmann::json register_actions =
     {
         { "path", "/api/v1/actions/register" },
@@ -626,6 +639,7 @@ void logi::applets::obs_plugin::register_parameter_actions()
             }
         }
     };
+    // clang-format on
 
     std::string new_actions = register_actions.dump();
 
@@ -1256,14 +1270,17 @@ action_parameters logi::applets::obs_plugin::helper_get_available_collections()
     std::vector<nlohmann::json> list_selection;
     for (auto collection : m_obs_collections)
     {
+        // clang-format off
         nlohmann::json selection =
         {
             { "displayName", collection.first },
             { "value", collection.first },
         };
+        // clang-format on
         list_selection.push_back(selection);
     }
 
+    // clang-format off
     nlohmann::json collections_parameter =
     {
         { "parameterId", actions::parameters::s_collection_name },
@@ -1272,6 +1289,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_collections()
         { "parameterType", "LIST" },
         { "listSelection" , list_selection }
     };
+    // clang-format on
 
     available_scenes.push_back(collections_parameter);
 
@@ -1291,14 +1309,17 @@ action_parameters logi::applets::obs_plugin::helper_get_available_scenes()
     std::vector<nlohmann::json> list_selection;
     for (auto scene : collection)
     {
+        // clang-format off
         nlohmann::json selection =
         {
             { "displayName", scene.first },
             { "value", scene.first },
         };
+        // clang-format on
         list_selection.push_back(selection);
     }
 
+    // clang-format off
     nlohmann::json scene_parameter =
     {
         { "parameterId", actions::parameters::s_scene_name },
@@ -1307,6 +1328,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_scenes()
         { "parameterType", "LIST" },
         { "listSelection" , list_selection }
     };
+    // clang-format on
 
     available_scenes.push_back(scene_parameter);
 
@@ -1329,14 +1351,17 @@ action_parameters logi::applets::obs_plugin::helper_get_available_sources()
         std::vector<nlohmann::json> list_selection_source;
         for (auto source : scene.second.sources)
         {
+            // clang-format off
             nlohmann::json selection =
             {
                 { "displayName", source },
                 { "value", source },
             };
+            // clang-format on
             list_selection_source.push_back(selection);
         }
 
+        // clang-format off
         nlohmann::json source_parameter =
         {
             { "parameterId", actions::parameters::s_source_name },
@@ -1352,9 +1377,11 @@ action_parameters logi::applets::obs_plugin::helper_get_available_sources()
             { "value", scene.first },
             { "parameters", { source_parameter } }
         };
+        // clang-format on
         list_selection.push_back(selection);
     }
 
+    // clang-format off
     nlohmann::json scene_parameter =
     {
         { "parameterId", actions::parameters::s_scene_name },
@@ -1363,6 +1390,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_sources()
         { "parameterType", "LIST" },
         { "listSelection" , list_selection }
     };
+    // clang-format on
 
     available_scenes.push_back(scene_parameter);
 
@@ -1385,14 +1413,17 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
         std::vector<nlohmann::json> list_selection_mixer;
         for (auto source : scene.second.mixers)
         {
+            // clang-format off
             nlohmann::json selection =
             {
                 { "displayName", source },
                 { "value", source },
             };
+            // clang-format on
             list_selection_mixer.push_back(selection);
         }
 
+        // clang-format off
         nlohmann::json mixer_parameter =
         {
             { "parameterId", actions::parameters::s_mixer_name },
@@ -1408,9 +1439,11 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
             { "value", scene.first },
             { "parameters", { mixer_parameter } }
         };
+        // clang-format on
         list_selection.push_back(selection);
     }
 
+    // clang-format off
     nlohmann::json scene_parameter =
     {
         { "parameterId", actions::parameters::s_scene_name },
@@ -1419,6 +1452,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
         { "parameterType", "LIST" },
         { "listSelection" , list_selection }
     };
+    // clang-format on
 
     available_scenes.push_back(scene_parameter);
 
@@ -1574,12 +1608,14 @@ void logi::applets::obs_plugin::loop_function()
 
         std::lock_guard<std::mutex> wlock(m_thread_lock);
 
+        // clang-format off
         // Gather obs data here...
         nlohmann::json new_status =
         {
             { "path", "/api/v1/integration/obs/status" },
             { "verb", "SET" }
         };
+        // clang-format on
 
         new_status["payload"]["inStudioMode"] = m_studio_mode;
 

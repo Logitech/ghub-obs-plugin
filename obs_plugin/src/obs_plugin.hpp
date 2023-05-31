@@ -19,6 +19,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace logi
@@ -41,7 +42,7 @@ namespace logi
             };
 
             using scenes = std::map<std::string, scene_info>;
-            using collection_to_scenes = std::map<std::string, scenes>;
+            using collection_to_scenes = std::unordered_map<std::string, scenes>;
 
             struct new_state_info
             {
@@ -57,82 +58,86 @@ namespace logi
             void disconnect();
             bool is_connected();
 
-            void _run_forever(void);
-            ws_client::connection_ptr _create_connection(void);
+            void _run_forever();
+            ws_client::connection_ptr _create_connection();
 
-            void websocket_open_handler(websocketpp::connection_hdl connection_handle);
-            void websocket_message_handler(websocketpp::connection_hdl connection_handle,
-                                           ws_client::message_ptr response);
-            void websocket_close_handler(websocketpp::connection_hdl connection_handle);
-            void websocket_fail_handler(websocketpp::connection_hdl connection_handle);
+            void websocket_open_handler(const websocketpp::connection_hdl &connection_handle);
+            void websocket_message_handler(const websocketpp::connection_hdl &connection_handle,
+                                           const ws_client::message_ptr &response);
+            void websocket_close_handler(const websocketpp::connection_hdl &connection_handle);
+            void websocket_fail_handler(const websocketpp::connection_hdl &connection_handle);
 
             bool register_integration();
 
             bool initialize_actions();
             void uninitialize_actions();
-            nlohmann::json register_action(std::string action_id,
-                                           std::string action_name,
-                                           action_parameters arguments = action_parameters());
+            nlohmann::json register_action(const std::string &action_id,
+                                           const std::string &action_name,
+                                           const action_parameters &arguments = action_parameters());
             bool register_actions_broadcast();
             void register_regular_actions();
             void register_parameter_actions();
 
             // Action handlers
-            void action_stream_start(action_invoke_parameters parameters);
-            void action_stream_stop(action_invoke_parameters parameters);
-            void action_stream_toggle(action_invoke_parameters parameters);
-            void action_recording_start(action_invoke_parameters parameters);
-            void action_recording_stop(action_invoke_parameters parameters);
-            void action_recording_toggle(action_invoke_parameters parameters);
-            void action_buffer_start(action_invoke_parameters parameters);
-            void action_buffer_stop(action_invoke_parameters parameters);
-            void action_buffer_toggle(action_invoke_parameters parameters);
-            void action_buffer_save(action_invoke_parameters parameters);
-            void action_desktop_mute(action_invoke_parameters parameters);
-            void action_desktop_unmute(action_invoke_parameters parameters);
-            void action_desktop_mute_toggle(action_invoke_parameters parameters);
-            void action_mic_mute(action_invoke_parameters parameters);
-            void action_mic_unmute(action_invoke_parameters parameters);
-            void action_mic_mute_toggle(action_invoke_parameters parameters);
-            void action_collection_activate(action_invoke_parameters parameters);
-            void action_scene_activate(action_invoke_parameters parameters);
-            void action_source_activate(action_invoke_parameters parameters);
-            void action_source_deactivate(action_invoke_parameters parameters);
-            void action_source_toggle(action_invoke_parameters parameters);
-            void action_mixer_mute(action_invoke_parameters parameters);
-            void action_mixer_unmute(action_invoke_parameters parameters);
-            void action_mixer_mute_toggle(action_invoke_parameters parameters);
+            void action_stream_start(const action_invoke_parameters &parameters);
+            void action_stream_stop(const action_invoke_parameters &parameters);
+            void action_stream_toggle(const action_invoke_parameters &parameters);
+            void action_recording_start(const action_invoke_parameters &parameters);
+            void action_recording_stop(const action_invoke_parameters &parameters);
+            void action_recording_toggle(const action_invoke_parameters &parameters);
+            void action_buffer_start(const action_invoke_parameters &parameters);
+            void action_buffer_stop(const action_invoke_parameters &parameters);
+            void action_buffer_toggle(const action_invoke_parameters &parameters);
+            void action_buffer_save(const action_invoke_parameters &parameters);
+            void action_desktop_mute(const action_invoke_parameters &parameters);
+            void action_desktop_unmute(const action_invoke_parameters &parameters);
+            void action_desktop_mute_toggle(const action_invoke_parameters &parameters);
+            void action_mic_mute(const action_invoke_parameters &parameters);
+            void action_mic_unmute(const action_invoke_parameters &parameters);
+            void action_mic_mute_toggle(const action_invoke_parameters &parameters);
+            void action_collection_activate(const action_invoke_parameters &parameters);
+            void action_scene_activate(const action_invoke_parameters &parameters);
+            void action_source_activate(const action_invoke_parameters &parameters);
+            void action_source_deactivate(const action_invoke_parameters &parameters);
+            void action_source_toggle(const action_invoke_parameters &parameters);
+            void action_mixer_mute(const action_invoke_parameters &parameters);
+            void action_mixer_unmute(const action_invoke_parameters &parameters);
+            void action_mixer_mute_toggle(const action_invoke_parameters &parameters);
 
 
             // Action helpers
             void helper_desktop_mute(bool new_state, bool is_toggle);
             void helper_mic_mute(bool new_state, bool is_toggle);
-            void helper_source_activate(std::string scene_name,
-                                        std::string source_name,
+            void helper_source_activate(const std::string &scene_name,
+                                        const std::string &source_name,
                                         bool new_state,
                                         bool is_toggle);
-            void helper_mixer_mute(std::string scene_name, std::string mixer_name, bool new_state, bool is_toggle);
+            void helper_mixer_mute(const std::string &scene_name,
+                                   const std::string &mixer_name,
+                                   bool new_state,
+                                   bool is_toggle);
             action_parameters helper_get_available_collections();
             action_parameters helper_get_available_scenes();
             action_parameters helper_get_available_sources();
             action_parameters helper_get_available_mixers();
-            void helper_populate_collections();
+            bool helper_populate_collections();
 
             // This function is to be used on messages that have to be delieved immediately
-            bool send_message(nlohmann::json &message);
+            bool send_message(nlohmann::json message);
 
             void start_loop();
             void stop_loop();
             void loop_function();
 
             std::atomic<bool> m_shutting_down;
+            std::atomic<bool> m_collection_locked;
 
             std::mutex m_lock;
             ws_client m_websocket;
             bool m_websocket_open;
             websocketpp::connection_hdl m_connection_handle;
-            std::string m_subprotocol = "json";
-            websocketpp::frame::opcode::value m_subprotocol_opcode = websocketpp::frame::opcode::text;
+            const std::string m_subprotocol = "json";
+            const websocketpp::frame::opcode::value m_subprotocol_opcode = websocketpp::frame::opcode::text;
             std::unique_ptr<std::thread> m_websocket_thread;
             uint16_t m_current_port = 9010;
 
@@ -155,8 +160,8 @@ namespace logi
             std::string registered_regular_actions;
             std::string registered_parametarized_actions;
 
-            std::string m_integration_guid = "";
-            std::string m_integration_instance = "";
+            std::string m_integration_guid;
+            std::string m_integration_instance;
 
             std::mutex m_initialization_mutex;
             std::condition_variable m_initialization_cv;

@@ -14,26 +14,28 @@ Helpful resources: https://obsproject.com/docs/reference-modules.html
 OBS_DECLARE_MODULE()
 
 
-const char *obs_module_name(void)
+const char *obs_module_name()
 {
     // The full name of the module
     return s_integration_name.c_str();
 }
 
 
-const char *obs_module_description(void)
+const char *obs_module_description()
 {
     // A description of the module
     return s_integration_description.c_str();
 }
 
 
-bool obs_module_load(void)
+bool obs_module_load()
 {
     // Called when the module is loaded.
     // Connect to G HUB
     m_shutting_down = false;
-    return connect();
+    connect();
+
+    return true;
 }
 
 
@@ -41,18 +43,28 @@ static void handle_obs_frontend_save(obs_data_t *save_data, bool saving, void *)
 {
     // Save implies frontend loaded
     // Populate our collections map here
-    helper_populate_collections();
-    register_parameter_actions();
+    if (helper_populate_collections())
+    {
+        register_parameter_actions();
+    }
 }
 
 
 static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 {
-    if (event == OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED
-        || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_CHANGED)
+    if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP)
     {
-        helper_populate_collections();
-        register_parameter_actions();
+        m_collection_locked = true;
+    }
+    else if (event == OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED
+             || event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_LIST_CHANGED || event == OBS_FRONTEND_EVENT_SCENE_CHANGED)
+    {
+        m_collection_locked = false;
+        std::lock_guard<std::mutex> wlock(m_thread_lock);
+        if (helper_populate_collections())
+        {
+            register_parameter_actions();
+        }
     }
     else if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED || event == OBS_FRONTEND_EVENT_RECORDING_STARTED)
     {
@@ -84,17 +96,13 @@ static void handle_obs_frontend_event(enum obs_frontend_event event, void *)
 
         uninitialize_actions();
 
-        obs_frontend_remove_event_callback(handle_obs_frontend_event, nullptr);
-        obs_frontend_remove_save_callback(handle_obs_frontend_save, nullptr);
-
         disconnect();
     }
 }
 
 
-void obs_module_post_load(void)
+void obs_module_post_load()
 {
-    // blog(LOG_INFO, "obs_module_post_load");
     register_integration();
 
     // Register all available actions
@@ -110,7 +118,7 @@ void obs_module_post_load(void)
 }
 
 
-void obs_module_unload(void)
+void obs_module_unload()
 {
     // Called when the module is unloaded.
     uninitialize_actions();
@@ -172,8 +180,8 @@ void logi::applets::obs_plugin::disconnect()
 
     m_websocket_open = false;
 
-    m_integration_guid = "";
-    m_integration_instance = "";
+    m_integration_guid.clear();
+    m_integration_instance.clear();
 }
 
 
@@ -184,7 +192,7 @@ bool logi::applets::obs_plugin::is_connected()
 }
 
 
-void logi::applets::obs_plugin::_run_forever(void)
+void logi::applets::obs_plugin::_run_forever()
 {
     {
         std::lock_guard<std::mutex> wl(m_lock);
@@ -200,7 +208,7 @@ void logi::applets::obs_plugin::_run_forever(void)
 }
 
 
-ws_client::connection_ptr logi::applets::obs_plugin::_create_connection(void)
+ws_client::connection_ptr logi::applets::obs_plugin::_create_connection()
 {
     websocketpp::lib::error_code error_code;
     auto connection = m_websocket.get_connection("ws://127.0.0.1:" + std::to_string(m_current_port), error_code);
@@ -211,11 +219,19 @@ ws_client::connection_ptr logi::applets::obs_plugin::_create_connection(void)
         return connection;
     }
 
-    connection->set_open_handler(std::bind(&websocket_open_handler, std::placeholders::_1));
+    connection->set_open_handler([](const websocketpp::connection_hdl &connection_handle) {
+        websocket_open_handler(connection_handle);
+    });
     connection->set_message_handler(
-        std::bind(&websocket_message_handler, std::placeholders::_1, std::placeholders::_2));
-    connection->set_close_handler(std::bind(&websocket_close_handler, std::placeholders::_1));
-    connection->set_fail_handler(std::bind(&websocket_fail_handler, std::placeholders::_1));
+        [](const websocketpp::connection_hdl &connection_handle, const ws_client::message_ptr &response) {
+            websocket_message_handler(connection_handle, response);
+        });
+    connection->set_close_handler([](const websocketpp::connection_hdl &connection_handle) {
+        websocket_close_handler(connection_handle);
+    });
+    connection->set_fail_handler([](const websocketpp::connection_hdl &connection_handle) {
+        websocket_fail_handler(connection_handle);
+    });
 
     if (!m_subprotocol.empty())
     {
@@ -228,7 +244,7 @@ ws_client::connection_ptr logi::applets::obs_plugin::_create_connection(void)
 }
 
 
-void logi::applets::obs_plugin::websocket_open_handler(websocketpp::connection_hdl connection_handle)
+void logi::applets::obs_plugin::websocket_open_handler(const websocketpp::connection_hdl &connection_handle)
 {
     {
         std::lock_guard<std::mutex> wl(m_lock);
@@ -238,164 +254,166 @@ void logi::applets::obs_plugin::websocket_open_handler(websocketpp::connection_h
 }
 
 
-void logi::applets::obs_plugin::websocket_message_handler(websocketpp::connection_hdl connection_handle,
-                                                          ws_client::message_ptr response)
+void logi::applets::obs_plugin::websocket_message_handler(const websocketpp::connection_hdl &connection_handle,
+                                                          const ws_client::message_ptr &response)
 {
     /* Received a message, handle it */
     std::string payload = response->get_payload();
 
-    if (!payload.empty())
+    if (payload.empty())
     {
-        try
+        return;
+    }
+
+    try
+    {
+        nlohmann::json message = nlohmann::json::parse(payload);
+
+        if (!message["result"].is_null() && (message["result"]["code"].get<std::string>() != "SUCCESS"))
         {
-            nlohmann::json message = nlohmann::json::parse(payload);
+            // We received an error message, abort!
+            return;
+        }
 
-            if (!message["result"].is_null() && (message["result"]["code"].get<std::string>() != "SUCCESS"))
+        if ((message["verb"].get<std::string>() == "BROADCAST")
+            && (message["path"].get<std::string>() == "/api/v1/integration/sdk/action/invoke"))
+        {
+            auto invoked_action = message["payload"];
+
+            if (!invoked_action.is_null())
             {
-                // We received an error message, abort!
-                return;
-            }
-
-            if ((message["verb"].get<std::string>() == "BROADCAST")
-                && (message["path"].get<std::string>() == "/api/v1/integration/sdk/action/invoke"))
-            {
-                auto invoked_action = message["payload"];
-
-                if (!invoked_action.is_null())
+                if (invoked_action["integrationGuid"] == m_integration_guid)
                 {
-                    if (invoked_action["integrationGuid"] == m_integration_guid)
-                    {
-                        action_invoke_parameters parameters = invoked_action["parameters"];
-                        std::string action_id = invoked_action["actionId"];
+                    action_invoke_parameters parameters = invoked_action["parameters"];
+                    std::string action_id = invoked_action["actionId"];
 
-                        if (action_id == actions::s_stream_start)
-                        {
-                            action_stream_start(parameters);
-                        }
-                        else if (action_id == actions::s_stream_stop)
-                        {
-                            action_stream_stop(parameters);
-                        }
-                        else if (action_id == actions::s_stream_toggle)
-                        {
-                            action_stream_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_recording_start)
-                        {
-                            action_recording_start(parameters);
-                        }
-                        else if (action_id == actions::s_recording_stop)
-                        {
-                            action_recording_stop(parameters);
-                        }
-                        else if (action_id == actions::s_recording_toggle)
-                        {
-                            action_recording_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_buffer_start)
-                        {
-                            action_buffer_start(parameters);
-                        }
-                        else if (action_id == actions::s_buffer_stop)
-                        {
-                            action_buffer_stop(parameters);
-                        }
-                        else if (action_id == actions::s_buffer_toggle)
-                        {
-                            action_buffer_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_buffer_save)
-                        {
-                            action_buffer_save(parameters);
-                        }
-                        else if (action_id == actions::s_desktop_mute)
-                        {
-                            action_desktop_mute(parameters);
-                        }
-                        else if (action_id == actions::s_desktop_unmute)
-                        {
-                            action_desktop_unmute(parameters);
-                        }
-                        else if (action_id == actions::s_desktop_mute_toggle)
-                        {
-                            action_desktop_mute_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_mic_mute)
-                        {
-                            action_mic_mute(parameters);
-                        }
-                        else if (action_id == actions::s_mic_unmute)
-                        {
-                            action_mic_unmute(parameters);
-                        }
-                        else if (action_id == actions::s_mic_mute_toggle)
-                        {
-                            action_mic_mute_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_collection_activate)
-                        {
-                            action_collection_activate(parameters);
-                        }
-                        else if (action_id == actions::s_scenes_activate)
-                        {
-                            action_scene_activate(parameters);
-                        }
-                        else if (action_id == actions::s_source_activate)
-                        {
-                            action_source_activate(parameters);
-                        }
-                        else if (action_id == actions::s_source_deactivate)
-                        {
-                            action_source_deactivate(parameters);
-                        }
-                        else if (action_id == actions::s_source_toggle)
-                        {
-                            action_source_toggle(parameters);
-                        }
-                        else if (action_id == actions::s_mixer_mute)
-                        {
-                            action_mixer_mute(parameters);
-                        }
-                        else if (action_id == actions::s_mixer_unmute)
-                        {
-                            action_mixer_unmute(parameters);
-                        }
-                        else if (action_id == actions::s_mixer_mute_toggle)
-                        {
-                            action_mixer_mute_toggle(parameters);
-                        }
+                    if (action_id == actions::s_stream_start)
+                    {
+                        action_stream_start(parameters);
+                    }
+                    else if (action_id == actions::s_stream_stop)
+                    {
+                        action_stream_stop(parameters);
+                    }
+                    else if (action_id == actions::s_stream_toggle)
+                    {
+                        action_stream_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_recording_start)
+                    {
+                        action_recording_start(parameters);
+                    }
+                    else if (action_id == actions::s_recording_stop)
+                    {
+                        action_recording_stop(parameters);
+                    }
+                    else if (action_id == actions::s_recording_toggle)
+                    {
+                        action_recording_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_buffer_start)
+                    {
+                        action_buffer_start(parameters);
+                    }
+                    else if (action_id == actions::s_buffer_stop)
+                    {
+                        action_buffer_stop(parameters);
+                    }
+                    else if (action_id == actions::s_buffer_toggle)
+                    {
+                        action_buffer_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_buffer_save)
+                    {
+                        action_buffer_save(parameters);
+                    }
+                    else if (action_id == actions::s_desktop_mute)
+                    {
+                        action_desktop_mute(parameters);
+                    }
+                    else if (action_id == actions::s_desktop_unmute)
+                    {
+                        action_desktop_unmute(parameters);
+                    }
+                    else if (action_id == actions::s_desktop_mute_toggle)
+                    {
+                        action_desktop_mute_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_mic_mute)
+                    {
+                        action_mic_mute(parameters);
+                    }
+                    else if (action_id == actions::s_mic_unmute)
+                    {
+                        action_mic_unmute(parameters);
+                    }
+                    else if (action_id == actions::s_mic_mute_toggle)
+                    {
+                        action_mic_mute_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_collection_activate)
+                    {
+                        action_collection_activate(parameters);
+                    }
+                    else if (action_id == actions::s_scenes_activate)
+                    {
+                        action_scene_activate(parameters);
+                    }
+                    else if (action_id == actions::s_source_activate)
+                    {
+                        action_source_activate(parameters);
+                    }
+                    else if (action_id == actions::s_source_deactivate)
+                    {
+                        action_source_deactivate(parameters);
+                    }
+                    else if (action_id == actions::s_source_toggle)
+                    {
+                        action_source_toggle(parameters);
+                    }
+                    else if (action_id == actions::s_mixer_mute)
+                    {
+                        action_mixer_mute(parameters);
+                    }
+                    else if (action_id == actions::s_mixer_unmute)
+                    {
+                        action_mixer_unmute(parameters);
+                    }
+                    else if (action_id == actions::s_mixer_mute_toggle)
+                    {
+                        action_mixer_mute_toggle(parameters);
                     }
                 }
             }
-            else if ((message["verb"].get<std::string>() == "SET")
-                     && (message["path"].get<std::string>() == "/api/v1/integration/activate"))
+        }
+        else if ((message["verb"].get<std::string>() == "SET")
+                 && (message["path"].get<std::string>() == "/api/v1/integration/activate"))
+        {
+            auto instance_info_payload = message["payload"];
+
+            if (!instance_info_payload.is_null())
             {
-                auto instance_info_payload = message["payload"];
+                std::string new_integration_guid = instance_info_payload["integrationGuid"].get<std::string>();
+                std::string new_integration_instance = instance_info_payload["instanceGuid"].get<std::string>();
 
-                if (!instance_info_payload.is_null())
+                if (m_integration_guid.empty() && !new_integration_guid.empty() && m_integration_instance.empty()
+                    && !new_integration_instance.empty())
                 {
-                    std::string new_integration_guid = instance_info_payload["integrationGuid"].get<std::string>();
-                    std::string new_integration_instance = instance_info_payload["instanceGuid"].get<std::string>();
-
-                    if (m_integration_guid.empty() && !new_integration_guid.empty() && m_integration_instance.empty()
-                        && !new_integration_instance.empty())
-                    {
-                        m_integration_guid = new_integration_guid;
-                        m_integration_instance = new_integration_instance;
-                    }
-
-                    m_initialization_cv.notify_all();
+                    m_integration_guid = new_integration_guid;
+                    m_integration_instance = new_integration_instance;
                 }
+
+                m_initialization_cv.notify_all();
             }
         }
-        catch (std::exception e)
-        {
-        }
+    }
+    catch (std::exception e)
+    {
     }
 }
 
 
-void logi::applets::obs_plugin::websocket_close_handler(websocketpp::connection_hdl connection_handle)
+void logi::applets::obs_plugin::websocket_close_handler(const websocketpp::connection_hdl &connection_handle)
 {
     {
         std::lock_guard<std::mutex> wl(m_lock);
@@ -407,7 +425,7 @@ void logi::applets::obs_plugin::websocket_close_handler(websocketpp::connection_
 }
 
 
-void logi::applets::obs_plugin::websocket_fail_handler(websocketpp::connection_hdl connection_handle)
+void logi::applets::obs_plugin::websocket_fail_handler(const websocketpp::connection_hdl &connection_handle)
 {
     /* Something failed! ABORT THE MISSION! ALT+F4 */
     {
@@ -505,9 +523,9 @@ void logi::applets::obs_plugin::uninitialize_actions()
 }
 
 
-nlohmann::json logi::applets::obs_plugin::register_action(std::string action_id,
-                                                          std::string action_name,
-                                                          action_parameters parameters)
+nlohmann::json logi::applets::obs_plugin::register_action(const std::string &action_id,
+                                                          const std::string &action_name,
+                                                          const action_parameters &parameters)
 {
     // clang-format off
     nlohmann::json action =
@@ -652,10 +670,10 @@ void logi::applets::obs_plugin::register_parameter_actions()
 }
 
 
-void logi::applets::obs_plugin::action_stream_start(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_stream_start(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -667,10 +685,10 @@ void logi::applets::obs_plugin::action_stream_start(action_invoke_parameters par
 }
 
 
-void logi::applets::obs_plugin::action_stream_stop(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_stream_stop(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -682,10 +700,10 @@ void logi::applets::obs_plugin::action_stream_stop(action_invoke_parameters para
 }
 
 
-void logi::applets::obs_plugin::action_stream_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_stream_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -701,10 +719,10 @@ void logi::applets::obs_plugin::action_stream_toggle(action_invoke_parameters pa
 }
 
 
-void logi::applets::obs_plugin::action_recording_start(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_recording_start(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -716,10 +734,10 @@ void logi::applets::obs_plugin::action_recording_start(action_invoke_parameters 
 }
 
 
-void logi::applets::obs_plugin::action_recording_stop(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_recording_stop(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -731,10 +749,10 @@ void logi::applets::obs_plugin::action_recording_stop(action_invoke_parameters p
 }
 
 
-void logi::applets::obs_plugin::action_recording_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_recording_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -750,10 +768,10 @@ void logi::applets::obs_plugin::action_recording_toggle(action_invoke_parameters
 }
 
 
-void logi::applets::obs_plugin::action_buffer_start(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_buffer_start(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -765,10 +783,10 @@ void logi::applets::obs_plugin::action_buffer_start(action_invoke_parameters par
 }
 
 
-void logi::applets::obs_plugin::action_buffer_stop(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_buffer_stop(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -780,10 +798,10 @@ void logi::applets::obs_plugin::action_buffer_stop(action_invoke_parameters para
 }
 
 
-void logi::applets::obs_plugin::action_buffer_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_buffer_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -799,10 +817,10 @@ void logi::applets::obs_plugin::action_buffer_toggle(action_invoke_parameters pa
 }
 
 
-void logi::applets::obs_plugin::action_buffer_save(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_buffer_save(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -811,10 +829,10 @@ void logi::applets::obs_plugin::action_buffer_save(action_invoke_parameters para
 }
 
 
-void logi::applets::obs_plugin::action_desktop_mute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_desktop_mute(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -823,10 +841,10 @@ void logi::applets::obs_plugin::action_desktop_mute(action_invoke_parameters par
 }
 
 
-void logi::applets::obs_plugin::action_desktop_unmute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_desktop_unmute(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -835,10 +853,10 @@ void logi::applets::obs_plugin::action_desktop_unmute(action_invoke_parameters p
 }
 
 
-void logi::applets::obs_plugin::action_desktop_mute_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_desktop_mute_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -847,10 +865,10 @@ void logi::applets::obs_plugin::action_desktop_mute_toggle(action_invoke_paramet
 }
 
 
-void logi::applets::obs_plugin::action_mic_mute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mic_mute(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -859,10 +877,10 @@ void logi::applets::obs_plugin::action_mic_mute(action_invoke_parameters paramet
 }
 
 
-void logi::applets::obs_plugin::action_mic_unmute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mic_unmute(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -871,10 +889,10 @@ void logi::applets::obs_plugin::action_mic_unmute(action_invoke_parameters param
 }
 
 
-void logi::applets::obs_plugin::action_mic_mute_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mic_mute_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires 0 parameters
-    if (parameters.size() != 0)
+    if (!parameters.empty())
     {
         return;
     }
@@ -883,7 +901,7 @@ void logi::applets::obs_plugin::action_mic_mute_toggle(action_invoke_parameters 
 }
 
 
-void logi::applets::obs_plugin::action_collection_activate(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_collection_activate(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 1 parameter
     if (parameters.size() != 1)
@@ -901,7 +919,7 @@ void logi::applets::obs_plugin::action_collection_activate(action_invoke_paramet
 }
 
 
-void logi::applets::obs_plugin::action_scene_activate(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_scene_activate(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 1 parameter
     if (parameters.size() != 1)
@@ -922,8 +940,13 @@ void logi::applets::obs_plugin::action_scene_activate(action_invoke_parameters p
     for (size_t i = 0; i < scenes.sources.num; i++)
     {
         obs_source_t *source = scenes.sources.array[i];
-        const char *name = obs_source_get_name(source);
-        std::string str_name = std::string(name);
+
+        if (!source)
+        {
+            continue;
+        }
+
+        std::string str_name(obs_source_get_name(source));
 
         if (str_name == scene_name)
         {
@@ -935,7 +958,7 @@ void logi::applets::obs_plugin::action_scene_activate(action_invoke_parameters p
 }
 
 
-void logi::applets::obs_plugin::action_source_activate(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_source_activate(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -962,7 +985,7 @@ void logi::applets::obs_plugin::action_source_activate(action_invoke_parameters 
 }
 
 
-void logi::applets::obs_plugin::action_source_deactivate(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_source_deactivate(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -989,7 +1012,7 @@ void logi::applets::obs_plugin::action_source_deactivate(action_invoke_parameter
 }
 
 
-void logi::applets::obs_plugin::action_source_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_source_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -1016,7 +1039,7 @@ void logi::applets::obs_plugin::action_source_toggle(action_invoke_parameters pa
 }
 
 
-void logi::applets::obs_plugin::action_mixer_mute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mixer_mute(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -1043,7 +1066,7 @@ void logi::applets::obs_plugin::action_mixer_mute(action_invoke_parameters param
 }
 
 
-void logi::applets::obs_plugin::action_mixer_unmute(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mixer_unmute(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -1070,7 +1093,7 @@ void logi::applets::obs_plugin::action_mixer_unmute(action_invoke_parameters par
 }
 
 
-void logi::applets::obs_plugin::action_mixer_mute_toggle(action_invoke_parameters parameters)
+void logi::applets::obs_plugin::action_mixer_mute_toggle(const action_invoke_parameters &parameters)
 {
     // This action requires exactly 2 parameters
     if (parameters.size() != 2)
@@ -1103,26 +1126,29 @@ void logi::applets::obs_plugin::helper_desktop_mute(bool new_state, bool is_togg
     for (int channel = 1; channel <= 2; channel++)
     {
         obs_source_t *sceneUsed = obs_get_output_source(channel);
-        if (sceneUsed)
+
+        if (!sceneUsed)
         {
-            if (is_toggle)
+            continue;
+        }
+
+        if (is_toggle)
+        {
+            if (obs_source_muted(sceneUsed))
             {
-                if (obs_source_muted(sceneUsed))
-                {
-                    obs_source_set_muted(sceneUsed, false);
-                }
-                else
-                {
-                    obs_source_set_muted(sceneUsed, true);
-                }
+                obs_source_set_muted(sceneUsed, false);
             }
             else
             {
-                obs_source_set_muted(sceneUsed, new_state);
+                obs_source_set_muted(sceneUsed, true);
             }
-
-            obs_source_release(sceneUsed);
         }
+        else
+        {
+            obs_source_set_muted(sceneUsed, new_state);
+        }
+
+        obs_source_release(sceneUsed);
     }
 }
 
@@ -1133,32 +1159,35 @@ void logi::applets::obs_plugin::helper_mic_mute(bool new_state, bool is_toggle)
     for (int channel = 3; channel <= 5; channel++)
     {
         obs_source_t *sceneUsed = obs_get_output_source(channel);
-        if (sceneUsed)
+
+        if (!sceneUsed)
         {
-            if (is_toggle)
+            continue;
+        }
+
+        if (is_toggle)
+        {
+            if (obs_source_muted(sceneUsed))
             {
-                if (obs_source_muted(sceneUsed))
-                {
-                    obs_source_set_muted(sceneUsed, false);
-                }
-                else
-                {
-                    obs_source_set_muted(sceneUsed, true);
-                }
+                obs_source_set_muted(sceneUsed, false);
             }
             else
             {
-                obs_source_set_muted(sceneUsed, new_state);
+                obs_source_set_muted(sceneUsed, true);
             }
-
-            obs_source_release(sceneUsed);
         }
+        else
+        {
+            obs_source_set_muted(sceneUsed, new_state);
+        }
+
+        obs_source_release(sceneUsed);
     }
 }
 
 
-void logi::applets::obs_plugin::helper_source_activate(std::string scene_name,
-                                                       std::string source_name,
+void logi::applets::obs_plugin::helper_source_activate(const std::string &scene_name,
+                                                       const std::string &source_name,
                                                        bool new_state,
                                                        bool is_toggle)
 {
@@ -1167,56 +1196,70 @@ void logi::applets::obs_plugin::helper_source_activate(std::string scene_name,
     for (size_t i = 0; i < scenes.sources.num; i++)
     {
         obs_source_t *source = scenes.sources.array[i];
-        const char *name = obs_source_get_name(source);
-        std::string str_name = std::string(name);
 
-        if (str_name == scene_name)
+        if (!source)
         {
-            obs_scene_t *scene = obs_scene_from_source(source);
-            new_state_info *state = new new_state_info;
-            state->name = source_name;
-            state->new_state = new_state;
-            state->is_toggle = is_toggle;
+            continue;
+        }
 
-            auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
-                new_state_info *parameters = (new_state_info *)privateData;
-                obs_source_t *source = obs_sceneitem_get_source(currentItem);
-                uint32_t source_type = obs_source_get_output_flags(source);
-                std::string str_source_name = std::string(obs_source_get_name(source));
+        std::string name(obs_source_get_name(source));
 
-                if (str_source_name == parameters->name)
+        if (name != scene_name)
+        {
+            continue;
+        }
+
+        obs_scene_t *scene = obs_scene_from_source(source);
+
+        if (!scene)
+        {
+            continue;
+        }
+
+        auto *state = new new_state_info;
+        state->name = source_name;
+        state->new_state = new_state;
+        state->is_toggle = is_toggle;
+
+        auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
+            auto *parameters = (new_state_info *)privateData;
+            obs_source_t *source = obs_sceneitem_get_source(currentItem);
+            uint32_t source_type = obs_source_get_output_flags(source);
+            std::string source_name(obs_source_get_name(source));
+
+            if (source_name == parameters->name)
+            {
+                if (parameters->is_toggle)
                 {
-                    if (parameters->is_toggle)
+                    if (obs_sceneitem_visible(currentItem))
                     {
-                        if (obs_sceneitem_visible(currentItem))
-                        {
-                            obs_sceneitem_set_visible(currentItem, false);
-                        }
-                        else
-                        {
-                            obs_sceneitem_set_visible(currentItem, true);
-                        }
+                        obs_sceneitem_set_visible(currentItem, false);
                     }
                     else
                     {
-                        obs_sceneitem_set_visible(currentItem, parameters->new_state);
+                        obs_sceneitem_set_visible(currentItem, true);
                     }
                 }
+                else
+                {
+                    obs_sceneitem_set_visible(currentItem, parameters->new_state);
+                }
+            }
 
-                return true;
-            };
-            obs_scene_enum_items(scene, sourceEnumProc, state);
-            delete state;
+            return true;
+        };
 
-            break;
-        }
+        obs_scene_enum_items(scene, sourceEnumProc, state);
+        delete state;
+
+        break;
     }
     obs_frontend_source_list_free(&scenes);
 }
 
 
-void logi::applets::obs_plugin::helper_mixer_mute(std::string scene_name,
-                                                  std::string mixer_name,
+void logi::applets::obs_plugin::helper_mixer_mute(const std::string &scene_name,
+                                                  const std::string &mixer_name,
                                                   bool new_state,
                                                   bool is_toggle)
 {
@@ -1225,49 +1268,63 @@ void logi::applets::obs_plugin::helper_mixer_mute(std::string scene_name,
     for (size_t i = 0; i < scenes.sources.num; i++)
     {
         obs_source_t *source = scenes.sources.array[i];
-        const char *name = obs_source_get_name(source);
-        std::string str_name = std::string(name);
 
-        if (str_name == scene_name)
+        if (!source)
         {
-            obs_scene_t *scene = obs_scene_from_source(source);
-            new_state_info *state = new new_state_info;
-            state->name = mixer_name;
-            state->new_state = new_state;
-            state->is_toggle = is_toggle;
+            continue;
+        }
 
-            auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
-                new_state_info *parameters = (new_state_info *)privateData;
-                obs_source_t *source = obs_sceneitem_get_source(currentItem);
-                uint32_t source_type = obs_source_get_output_flags(source);
-                std::string str_source_name = std::string(obs_source_get_name(source));
+        std::string name(obs_source_get_name(source));
 
-                if (str_source_name == parameters->name)
+        if (name != scene_name)
+        {
+            continue;
+        }
+
+        obs_scene_t *scene = obs_scene_from_source(source);
+
+        if (!scene)
+        {
+            continue;
+        }
+
+        auto *state = new new_state_info;
+        state->name = mixer_name;
+        state->new_state = new_state;
+        state->is_toggle = is_toggle;
+
+        auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
+            auto *parameters = (new_state_info *)privateData;
+            obs_source_t *source = obs_sceneitem_get_source(currentItem);
+            uint32_t source_type = obs_source_get_output_flags(source);
+            std::string source_name(obs_source_get_name(source));
+
+            if (source_name == parameters->name)
+            {
+                if (parameters->is_toggle)
                 {
-                    if (parameters->is_toggle)
+                    if (obs_source_muted(source))
                     {
-                        if (obs_source_muted(source))
-                        {
-                            obs_source_set_muted(source, false);
-                        }
-                        else
-                        {
-                            obs_source_set_muted(source, true);
-                        }
+                        obs_source_set_muted(source, false);
                     }
                     else
                     {
-                        obs_source_set_muted(source, parameters->new_state);
+                        obs_source_set_muted(source, true);
                     }
                 }
+                else
+                {
+                    obs_source_set_muted(source, parameters->new_state);
+                }
+            }
 
-                return true;
-            };
-            obs_scene_enum_items(scene, sourceEnumProc, state);
-            delete state;
+            return true;
+        };
 
-            break;
-        }
+        obs_scene_enum_items(scene, sourceEnumProc, state);
+        delete state;
+
+        break;
     }
     obs_frontend_source_list_free(&scenes);
 }
@@ -1278,7 +1335,7 @@ action_parameters logi::applets::obs_plugin::helper_get_available_collections()
     action_parameters available_scenes;
 
     std::vector<nlohmann::json> list_selection;
-    for (auto collection : m_obs_collections)
+    for (const auto &collection : m_obs_collections)
     {
         // clang-format off
         nlohmann::json selection =
@@ -1311,13 +1368,23 @@ action_parameters logi::applets::obs_plugin::helper_get_available_scenes()
 {
     action_parameters available_scenes;
 
-    char *current_collection = obs_frontend_get_current_scene_collection();
-    std::string current_collection_str = std::string(current_collection);
-    auto collection = m_obs_collections[current_collection_str];
-    bfree(current_collection);
+    std::string current_collection_name;
+
+    {
+        char *current_collection = obs_frontend_get_current_scene_collection();
+        current_collection_name = std::string(current_collection);
+        bfree(current_collection);
+    }
+
+    if (current_collection_name.empty())
+    {
+        return available_scenes;
+    }
+
+    auto current_collection = m_obs_collections[current_collection_name];
 
     std::vector<nlohmann::json> list_selection;
-    for (auto scene : collection)
+    for (const auto &scene : current_collection)
     {
         // clang-format off
         nlohmann::json selection =
@@ -1350,16 +1417,26 @@ action_parameters logi::applets::obs_plugin::helper_get_available_sources()
 {
     action_parameters available_scenes;
 
-    char *current_collection = obs_frontend_get_current_scene_collection();
-    std::string current_collection_str = std::string(current_collection);
-    auto collection = m_obs_collections[current_collection_str];
-    bfree(current_collection);
+    std::string current_collection_name;
+
+    {
+        char *current_collection = obs_frontend_get_current_scene_collection();
+        current_collection_name = std::string(current_collection);
+        bfree(current_collection);
+    }
+
+    if (current_collection_name.empty())
+    {
+        return available_scenes;
+    }
+
+    auto current_collection = m_obs_collections[current_collection_name];
 
     std::vector<nlohmann::json> list_selection;
-    for (auto scene : collection)
+    for (const auto &scene : current_collection)
     {
         std::vector<nlohmann::json> list_selection_source;
-        for (auto source : scene.second.sources)
+        for (const auto &source : scene.second.sources)
         {
             // clang-format off
             nlohmann::json selection =
@@ -1412,16 +1489,26 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
 {
     action_parameters available_scenes;
 
-    char *current_collection = obs_frontend_get_current_scene_collection();
-    std::string current_collection_str = std::string(current_collection);
-    auto collection = m_obs_collections[current_collection_str];
-    bfree(current_collection);
+    std::string current_collection_name;
+
+    {
+        char *current_collection = obs_frontend_get_current_scene_collection();
+        current_collection_name = std::string(current_collection);
+        bfree(current_collection);
+    }
+
+    if (current_collection_name.empty())
+    {
+        return available_scenes;
+    }
+
+    auto current_collection = m_obs_collections[current_collection_name];
 
     std::vector<nlohmann::json> list_selection;
-    for (auto scene : collection)
+    for (const auto &scene : current_collection)
     {
         std::vector<nlohmann::json> list_selection_mixer;
-        for (auto source : scene.second.mixers)
+        for (const auto &source : scene.second.mixers)
         {
             // clang-format off
             nlohmann::json selection =
@@ -1470,45 +1557,79 @@ action_parameters logi::applets::obs_plugin::helper_get_available_mixers()
 }
 
 
-void logi::applets::obs_plugin::helper_populate_collections()
+bool logi::applets::obs_plugin::helper_populate_collections()
 {
     if (m_shutting_down)
     {
         // Let's not do any enumeration on shutdown
-        return;
+        return false;
     }
 
-    char *current_collection = obs_frontend_get_current_scene_collection();
-
-    char **collection_names_orig = obs_frontend_get_scene_collections();
-    char **collection_names = collection_names_orig;
-
-    // Initialize all collection names
-    for (char *collection_name = *collection_names; collection_name; collection_name = *++collection_names)
+    if (m_collection_locked)
     {
-        m_obs_collections[std::string(collection_name)];
+        // Cannot access scene collection at this time
+        return false;
     }
 
-    bfree(collection_names_orig);
+    std::string current_collection_name;
 
-    m_obs_collections[std::string(current_collection)].clear();
+    {
+        char *current_collection = obs_frontend_get_current_scene_collection();
+        current_collection_name = std::string(current_collection);
+        bfree(current_collection);
+    }
+
+    if (current_collection_name.empty())
+    {
+        // No current collection
+        return false;
+    }
+
+    {
+        char **scene_collections = obs_frontend_get_scene_collections();
+        auto collection_names = scene_collections;
+
+        // Initialize all collection names
+        for (char *collection_name = *collection_names; collection_name; collection_name = *++collection_names)
+        {
+            m_obs_collections[std::string(collection_name)];
+        }
+
+        bfree(scene_collections);
+    }
+
+    auto current_collection = m_obs_collections[current_collection_name];
+
+    current_collection.clear();
 
     obs_frontend_source_list scenes = {};
     obs_frontend_get_scenes(&scenes);
     for (size_t i = 0; i < scenes.sources.num; i++)
     {
         obs_source_t *source = scenes.sources.array[i];
-        const char *name = obs_source_get_name(source);
-        obs_scene_t *scene = obs_scene_from_source(source);
-        scene_info *obs_scenes = new scene_info;
 
-        m_obs_collections[std::string(current_collection)][std::string(name)].sources.clear();
+        if (!source)
+        {
+            continue;
+        }
+
+        const std::string name_str(obs_source_get_name(source));
+        obs_scene_t *scene = obs_scene_from_source(source);
+
+        if (!scene)
+        {
+            continue;
+        }
+
+        auto *obs_scenes = new scene_info;
+        auto current_collection_scene = current_collection[name_str];
+
+        current_collection_scene.sources.clear();
 
         auto sourceEnumProc = [](obs_scene_t *scene, obs_sceneitem_t *currentItem, void *privateData) -> bool {
-            scene_info *parameters = (scene_info *)privateData;
+            auto *parameters = (scene_info *)privateData;
 
             obs_source_t *source = obs_sceneitem_get_source(currentItem);
-
             uint32_t source_type = obs_source_get_output_flags(source);
 
             if (((source_type & OBS_SOURCE_VIDEO) == OBS_SOURCE_VIDEO)
@@ -1525,24 +1646,25 @@ void logi::applets::obs_plugin::helper_populate_collections()
         };
         obs_scene_enum_items(scene, sourceEnumProc, obs_scenes);
 
-        for (auto scene_element : obs_scenes->sources)
+        for (const auto &scene_element : obs_scenes->sources)
         {
-            m_obs_collections[std::string(current_collection)][std::string(name)].sources.push_back(scene_element);
+            current_collection_scene.sources.push_back(scene_element);
         }
 
-        for (auto scene_element : obs_scenes->mixers)
+        for (const auto &scene_element : obs_scenes->mixers)
         {
-            m_obs_collections[std::string(current_collection)][std::string(name)].mixers.push_back(scene_element);
+            current_collection_scene.mixers.push_back(scene_element);
         }
 
         delete obs_scenes;
     }
     obs_frontend_source_list_free(&scenes);
-    bfree(current_collection);
+
+    return true;
 }
 
 
-bool logi::applets::obs_plugin::send_message(nlohmann::json &message)
+bool logi::applets::obs_plugin::send_message(nlohmann::json message)
 {
     if (!is_connected())
     {
@@ -1628,23 +1750,25 @@ void logi::applets::obs_plugin::loop_function()
         };
         // clang-format on
 
-        new_status["payload"]["inStudioMode"] = m_studio_mode;
+        auto status_payload = new_status["payload"];
+
+        status_payload["inStudioMode"] = m_studio_mode;
 
         obs_output_t *obs_output = nullptr;
 
         if (obs_frontend_streaming_active())
         {
             obs_output = obs_frontend_get_streaming_output();
-            new_status["payload"]["currentState"] = "STREAMING";
+            status_payload["currentState"] = "STREAMING";
         }
         else if (obs_frontend_recording_active())
         {
             obs_output = obs_frontend_get_recording_output();
-            new_status["payload"]["currentState"] = "RECORDING";
+            status_payload["currentState"] = "RECORDING";
         }
         else
         {
-            new_status["payload"]["currentState"] = "IDLE";
+            status_payload["currentState"] = "IDLE";
         }
 
         double_t bps = 0;
@@ -1652,7 +1776,7 @@ void logi::applets::obs_plugin::loop_function()
         if (nullptr != obs_output)
         {
             // Calculate bitrate
-            int32_t streamed_bytes = static_cast<int32_t>(obs_output_get_total_bytes(obs_output));
+            auto streamed_bytes = static_cast<int32_t>(obs_output_get_total_bytes(obs_output));
             int32_t bytes_per_second = streamed_bytes - m_total_streamed_bytes;
             bps = (static_cast<double_t>(bytes_per_second) / 1000)
                   * 8;  // Bytes/s converted to KiloBytes/s then converted to Kilobits/s
@@ -1665,14 +1789,14 @@ void logi::applets::obs_plugin::loop_function()
 
             m_total_streamed_frames = streamed_frames;
         }
-        new_status["payload"]["bitrate"] = bps;
-        new_status["payload"]["framerate"] = fps;
+        status_payload["bitrate"] = bps;
+        status_payload["framerate"] = fps;
 
         int32_t duration_hours = 0;
         int32_t duration_minutes = 0;
         int32_t duration_seconds = 0;
 
-        if (new_status["payload"]["currentState"] != "IDLE")
+        if (status_payload["currentState"] != "IDLE")
         {
             auto duration = std::chrono::high_resolution_clock::now() - m_start_time;
             duration_hours = std::chrono::duration_cast<std::chrono::hours>(duration).count() % 24;
@@ -1699,24 +1823,24 @@ void logi::applets::obs_plugin::loop_function()
             seconds_str = (duration_seconds < 10 ? "0" : "") + std::to_string(duration_seconds);
         }
 
-        new_status["payload"]["uptime"] = hours_str + ":" + minutes_str + ":" + seconds_str;
+        status_payload["uptime"] = hours_str + ":" + minutes_str + ":" + seconds_str;
 
         if (cpu_usage != nullptr)
         {
-            new_status["payload"]["cpuUsage"] = os_cpu_usage_info_query(cpu_usage);
+            status_payload["cpuUsage"] = os_cpu_usage_info_query(cpu_usage);
         }
 
         char *current_profile = obs_frontend_get_current_profile();
         if (current_profile != nullptr)
         {
-            new_status["payload"]["activeProfile"] = std::string(current_profile);
+            status_payload["activeProfile"] = std::string(current_profile);
             bfree(current_profile);
         }
 
         char *current_collection = obs_frontend_get_current_scene_collection();
         if (current_collection != nullptr)
         {
-            new_status["payload"]["activeCollection"] = std::string(current_collection);
+            status_payload["activeCollection"] = std::string(current_collection);
             bfree(current_collection);
         }
 
@@ -1726,7 +1850,7 @@ void logi::applets::obs_plugin::loop_function()
             const char *scene_name = obs_source_get_name(current_scene);
             if (scene_name != nullptr)
             {
-                new_status["payload"]["activeScene"] = std::string(scene_name);
+                status_payload["activeScene"] = std::string(scene_name);
             }
             obs_source_release(current_scene);
         }

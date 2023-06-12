@@ -29,7 +29,7 @@ if(WIN32)
 elseif(APPLE)
     set(LIBS 
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs.dylib
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs-frontend-api.dylib)
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/obs-frontend-api.dylib)
 
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--export-all-symbols")
 

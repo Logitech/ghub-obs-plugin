@@ -14,19 +14,10 @@ set(HEADERS
     src/obs_plugin.hpp)
 
 if(WIN32)
-    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "4") 
+    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8") 
         set(LIBS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/x86/obs.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/x86/obs-frontend-api.lib)
-    else() 
-        set(LIBS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/x64/obs.lib
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/x64/obs-frontend-api.lib)
-    endif()
-
-    # This is only for 32-bit Windows builds linking with OpenSSL
-    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "4")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /SAFESEH:NO")
+            ${CMAKE_CURRENT_SOURCE_DIR}/libs/x64/obs.lib
+            ${CMAKE_CURRENT_SOURCE_DIR}/libs/x64/obs-frontend-api.lib)
     endif()
 
     if(COMMAND generate_product_version)
@@ -37,8 +28,8 @@ if(WIN32)
     add_library(logi_applets_obs_plugin SHARED ${SOURCES} ${HEADERS} ${VERSION})
 elseif(APPLE)
     set(LIBS 
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs.dylib
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs-frontend-api.dylib)
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs.dylib
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs-frontend-api.dylib)
 
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--export-all-symbols")
 
@@ -48,9 +39,7 @@ endif()
 
 if(WIN32)
     # Rename the binary based on the bitness
-    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "4")
-        set_target_properties(logi_applets_obs_plugin PROPERTIES OUTPUT_NAME "${APPLET_NAME}_x86")
-    else()
+    if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
         set_target_properties(logi_applets_obs_plugin PROPERTIES OUTPUT_NAME "${APPLET_NAME}_x64")
     endif()
 elseif(APPLE)

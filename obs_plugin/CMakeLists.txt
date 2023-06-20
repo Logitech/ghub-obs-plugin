@@ -61,7 +61,10 @@ get_filename_component(DEPS_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 
 target_include_directories(logi_applets_obs_plugin
     PUBLIC
-    include
+    include)
+
+target_include_directories(logi_applets_obs_plugin
+    SYSTEM PUBLIC
     ${DEPS_DIR}/other/obs-studio
     ${DEPS_DIR}/other/websocketpp
     ${DEPS_DIR}/other/json/include

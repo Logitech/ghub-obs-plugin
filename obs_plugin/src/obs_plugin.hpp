@@ -134,7 +134,7 @@ namespace logi
 
             std::mutex m_lock;
             ws_client m_websocket;
-            bool m_websocket_open;
+            bool m_websocket_open = false;
             websocketpp::connection_hdl m_connection_handle;
             const std::string m_subprotocol = "json";
             const websocketpp::frame::opcode::value m_subprotocol_opcode = websocketpp::frame::opcode::text;

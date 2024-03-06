@@ -1598,7 +1598,7 @@ bool logi::applets::obs_plugin::helper_populate_collections()
         bfree(scene_collections);
     }
 
-    auto current_collection = m_obs_collections[current_collection_name];
+    auto &current_collection = m_obs_collections[current_collection_name];
 
     current_collection.clear();
 
@@ -1622,7 +1622,7 @@ bool logi::applets::obs_plugin::helper_populate_collections()
         }
 
         auto *obs_scenes = new scene_info;
-        auto current_collection_scene = current_collection[name_str];
+        auto &current_collection_scene = current_collection[name_str];
 
         current_collection_scene.sources.clear();
 

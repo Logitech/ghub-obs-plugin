@@ -1,9 +1,9 @@
 [submodule "other/json"]
 	path = other/json
 	url = https://github.com/nlohmann/json
-[submodule "other/websocketpp"]
-	path = other/websocketpp
-	url = https://github.com/zaphoyd/websocketpp
 [submodule "other/asio"]
 	path = other/asio
 	url = https://github.com/chriskohlhoff/asio
+[submodule "other/logi_websocketpp"]
+	path = other/websocketpp
+	url = https://github.com/Logitech/logi_websocketpp

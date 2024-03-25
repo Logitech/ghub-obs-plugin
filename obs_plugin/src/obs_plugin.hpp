@@ -1,8 +1,14 @@
 #pragma once
 
 #define _WEBSOCKETPP_CPP11_RANDOM_DEVICE_
-#define ASIO_STANDALONE
-#define _WEBSOCKETPP_CPP11_TYPE_TRAITS_
+
+#ifndef ASIO_STANDALONE
+    #define ASIO_STANDALONE
+#endif
+
+#ifndef _WEBSOCKETPP_CPP11_TYPE_TRAITS_
+    #define _WEBSOCKETPP_CPP11_TYPE_TRAITS_
+#endif
 
 #pragma warning(push)
 #pragma warning(disable : 4267)

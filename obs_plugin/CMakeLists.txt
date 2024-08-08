@@ -27,6 +27,8 @@ if(WIN32)
     endif()
     add_library(logi_applets_obs_plugin SHARED ${SOURCES} ${HEADERS} ${VERSION})
 elseif(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0")
     set(LIBS 
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/libobs.dylib
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/osx/obs-frontend-api.dylib)

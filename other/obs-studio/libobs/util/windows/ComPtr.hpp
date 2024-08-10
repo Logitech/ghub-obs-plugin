@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,6 +15,10 @@
  */
 
 #pragma once
+
+#ifdef _WIN32
+#include <Unknwn.h>
+#endif
 
 /* Oh no I have my own com pointer class, the world is ending, how dare you
  * write your own! */
@@ -33,18 +37,32 @@ protected:
 	inline void Replace(T *p)
 	{
 		if (ptr != p) {
-			if (p)   p->AddRef();
-			if (ptr) ptr->Release();
+			if (p)
+				p->AddRef();
+			if (ptr)
+				ptr->Release();
 			ptr = p;
 		}
 	}
 
 public:
-	inline ComPtr() : ptr(nullptr)                 {}
-	inline ComPtr(T *p) : ptr(p)                   {if (ptr) ptr->AddRef();}
-	inline ComPtr(const ComPtr<T> &c) : ptr(c.ptr) {if (ptr) ptr->AddRef();}
-	inline ComPtr(ComPtr<T> &&c) : ptr(c.ptr)      {c.ptr = nullptr;}
-	inline ~ComPtr()                               {Kill();}
+	inline ComPtr() : ptr(nullptr) {}
+	inline ComPtr(T *p) : ptr(p)
+	{
+		if (ptr)
+			ptr->AddRef();
+	}
+	inline ComPtr(const ComPtr<T> &c) : ptr(c.ptr)
+	{
+		if (ptr)
+			ptr->AddRef();
+	}
+	inline ComPtr(ComPtr<T> &&c) noexcept : ptr(c.ptr) { c.ptr = nullptr; }
+	template<class U>
+	inline ComPtr(ComPtr<U> &&c) noexcept : ptr(c.Detach())
+	{
+	}
+	inline ~ComPtr() { Kill(); }
 
 	inline void Clear()
 	{
@@ -66,13 +84,21 @@ public:
 		return *this;
 	}
 
-	inline ComPtr<T> &operator=(ComPtr<T> &&c)
+	inline ComPtr<T> &operator=(ComPtr<T> &&c) noexcept
 	{
-		if (this != &c) {
+		if (&ptr != &c.ptr) {
 			Kill();
 			ptr = c.ptr;
 			c.ptr = nullptr;
 		}
+
+		return *this;
+	}
+
+	template<class U> inline ComPtr<T> &operator=(ComPtr<U> &&c) noexcept
+	{
+		Kill();
+		ptr = c.Detach();
 
 		return *this;
 	}
@@ -87,7 +113,8 @@ public:
 	inline void CopyTo(T **out)
 	{
 		if (out) {
-			if (ptr) ptr->AddRef();
+			if (ptr)
+				ptr->AddRef();
 			*out = ptr;
 		}
 	}
@@ -96,26 +123,35 @@ public:
 	{
 		ULONG ref;
 
-		if (!ptr) return 0;
+		if (!ptr)
+			return 0;
 		ref = ptr->Release();
 		ptr = nullptr;
 		return ref;
 	}
 
-	inline T **Assign()                {Clear(); return &ptr;}
-	inline void Set(T *p)              {Kill(); ptr = p;}
+	inline T **Assign()
+	{
+		Clear();
+		return &ptr;
+	}
+	inline void Set(T *p)
+	{
+		Kill();
+		ptr = p;
+	}
 
-	inline T *Get() const              {return ptr;}
+	inline T *Get() const { return ptr; }
 
-	inline T **operator&()             {return Assign();}
+	inline T **operator&() { return Assign(); }
 
-	inline    operator T*() const      {return ptr;}
-	inline T *operator->() const       {return ptr;}
+	inline operator T *() const { return ptr; }
+	inline T *operator->() const { return ptr; }
 
-	inline bool operator==(T *p) const {return ptr == p;}
-	inline bool operator!=(T *p) const {return ptr != p;}
+	inline bool operator==(T *p) const { return ptr == p; }
+	inline bool operator!=(T *p) const { return ptr != p; }
 
-	inline bool operator!() const      {return !ptr;}
+	inline bool operator!() const { return !ptr; }
 };
 
 #ifdef _WIN32
@@ -126,13 +162,19 @@ public:
 	inline ComQIPtr(IUnknown *unk)
 	{
 		this->ptr = nullptr;
-		unk->QueryInterface(__uuidof(T), (void**)&this->ptr);
+		unk->QueryInterface(__uuidof(T), (void **)&this->ptr);
+	}
+
+	template<class U> inline ComQIPtr(const ComPtr<U> &c)
+	{
+		this->ptr = nullptr;
+		c->QueryInterface(__uuidof(T), (void **)&this->ptr);
 	}
 
 	inline ComPtr<T> &operator=(IUnknown *unk)
 	{
 		ComPtr<T>::Clear();
-		unk->QueryInterface(__uuidof(T), (void**)&this->ptr);
+		unk->QueryInterface(__uuidof(T), (void **)&this->ptr);
 		return *this;
 	}
 };

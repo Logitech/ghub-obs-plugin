@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -51,11 +51,19 @@ static inline util_uint128_t util_add128(util_uint128_t a, util_uint128_t b)
 	return out;
 }
 
-static inline util_uint128_t util_lshift64(uint64_t a, int num)
+static inline util_uint128_t util_lshift64_internal_32(uint64_t a)
 {
 	util_uint128_t val;
-	val.low = a << num;
-	val.high = a >> (64 - num);
+	val.low = a << 32;
+	val.high = a >> 32;
+	return val;
+}
+
+static inline util_uint128_t util_lshift64_internal_64(uint64_t a)
+{
+	util_uint128_t val;
+	val.low = 0;
+	val.high = a;
 	return val;
 }
 
@@ -69,13 +77,13 @@ static inline util_uint128_t util_mul64_64(uint64_t a, uint64_t b)
 	out.high = 0;
 
 	m = (a >> 32) * (b & 0xFFFFFFFFULL);
-	out = util_add128(out, util_lshift64(m, 32));
+	out = util_add128(out, util_lshift64_internal_32(m));
 
 	m = (a & 0xFFFFFFFFULL) * (b >> 32);
-	out = util_add128(out, util_lshift64(m, 32));
+	out = util_add128(out, util_lshift64_internal_32(m));
 
 	m = (a >> 32) * (b >> 32);
-	out = util_add128(out, util_lshift64(m, 64));
+	out = util_add128(out, util_lshift64_internal_64(m));
 
 	return out;
 }

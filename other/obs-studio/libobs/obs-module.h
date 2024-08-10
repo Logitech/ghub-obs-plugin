@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2014 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -18,12 +18,6 @@
 #pragma once
 
 #include "obs.h"
-
-#if defined (TOOLCHAIN_OS_OSX)
-    #define EXPORT_VISIBILITY __attribute__ ((visibility ("default")))
-#else
-    #define EXPORT_VISIBILITY
-#endif
 
 #ifdef __cplusplus
 #define MODULE_EXPORT extern "C" EXPORT
@@ -79,16 +73,22 @@ bool obs_module_load(void)
  */
 
 /** Required: Declares a libobs module. */
-#define OBS_DECLARE_MODULE() \
-	static obs_module_t *obs_module_pointer; \
-	MODULE_EXPORT void EXPORT_VISIBILITY obs_module_set_pointer(obs_module_t *module); \
-	void obs_module_set_pointer(obs_module_t *module) \
-	{ \
-		obs_module_pointer = module; \
-	} \
-	obs_module_t *obs_current_module(void) {return obs_module_pointer;} \
-	MODULE_EXPORT uint32_t EXPORT_VISIBILITY obs_module_ver(void); \
-	uint32_t obs_module_ver(void) {return LIBOBS_API_VER;}
+#define OBS_DECLARE_MODULE()                                             \
+	static obs_module_t *obs_module_pointer;                         \
+	MODULE_EXPORT void obs_module_set_pointer(obs_module_t *module); \
+	void obs_module_set_pointer(obs_module_t *module)                \
+	{                                                                \
+		obs_module_pointer = module;                             \
+	}                                                                \
+	obs_module_t *obs_current_module(void)                           \
+	{                                                                \
+		return obs_module_pointer;                               \
+	}                                                                \
+	MODULE_EXPORT uint32_t obs_module_ver(void);                     \
+	uint32_t obs_module_ver(void)                                    \
+	{                                                                \
+		return LIBOBS_API_VER;                                   \
+	}
 
 /**
  * Required: Called when the module is loaded.  Use this function to load all
@@ -98,55 +98,56 @@ bool obs_module_load(void)
  * @return           Return true to continue loading the module, otherwise
  *                   false to indicate failure and unload the module
  */
-MODULE_EXPORT bool EXPORT_VISIBILITY obs_module_load(void);
+MODULE_EXPORT bool obs_module_load(void);
 
 /** Optional: Called when the module is unloaded.  */
-MODULE_EXPORT void EXPORT_VISIBILITY obs_module_unload(void);
+MODULE_EXPORT void obs_module_unload(void);
 
 /** Optional: Called when all modules have finished loading */
-MODULE_EXPORT void EXPORT_VISIBILITY obs_module_post_load(void);
+MODULE_EXPORT void obs_module_post_load(void);
 
 /** Called to set the current locale data for the module.  */
-MODULE_EXPORT void EXPORT_VISIBILITY obs_module_set_locale(const char *locale);
+MODULE_EXPORT void obs_module_set_locale(const char *locale);
 
 /** Called to free the current locale data for the module.  */
-MODULE_EXPORT void EXPORT_VISIBILITY obs_module_free_locale(void);
+MODULE_EXPORT void obs_module_free_locale(void);
 
 /** Optional: Use this macro in a module to use default locale handling. */
-#define OBS_MODULE_USE_DEFAULT_LOCALE(module_name, default_locale) \
-	lookup_t *obs_module_lookup = NULL; \
-	const char *obs_module_text(const char *val) \
-	{ \
-		const char *out = val; \
-		text_lookup_getstr(obs_module_lookup, val, &out); \
-		return out; \
-	} \
-	bool obs_module_get_string(const char *val, const char **out) \
-	{ \
+#define OBS_MODULE_USE_DEFAULT_LOCALE(module_name, default_locale)      \
+	lookup_t *obs_module_lookup = NULL;                             \
+	const char *obs_module_text(const char *val)                    \
+	{                                                               \
+		const char *out = val;                                  \
+		text_lookup_getstr(obs_module_lookup, val, &out);       \
+		return out;                                             \
+	}                                                               \
+	bool obs_module_get_string(const char *val, const char **out)   \
+	{                                                               \
 		return text_lookup_getstr(obs_module_lookup, val, out); \
-	} \
-	void obs_module_set_locale(const char *locale) \
-	{ \
-		if (obs_module_lookup) text_lookup_destroy(obs_module_lookup); \
-		obs_module_lookup = obs_module_load_locale( \
-				obs_current_module(), \
-				default_locale, locale); \
-	} \
-	void obs_module_free_locale(void) \
-	{ \
-		text_lookup_destroy(obs_module_lookup); \
+	}                                                               \
+	void obs_module_set_locale(const char *locale)                  \
+	{                                                               \
+		if (obs_module_lookup)                                  \
+			text_lookup_destroy(obs_module_lookup);         \
+		obs_module_lookup = obs_module_load_locale(             \
+			obs_current_module(), default_locale, locale);  \
+	}                                                               \
+	void obs_module_free_locale(void)                               \
+	{                                                               \
+		text_lookup_destroy(obs_module_lookup);                 \
+		obs_module_lookup = NULL;                               \
 	}
 
 /** Helper function for looking up locale if default locale handler was used */
-MODULE_EXTERN const char EXPORT_VISIBILITY *obs_module_text(const char *lookup_string);
+MODULE_EXTERN const char *obs_module_text(const char *lookup_string);
 
 /** Helper function for looking up locale if default locale handler was used,
  * returns true if text found, otherwise false */
-MODULE_EXTERN bool EXPORT_VISIBILITY obs_module_get_string(const char *lookup_string,
-		const char **translated_string);
+MODULE_EXPORT bool obs_module_get_string(const char *lookup_string,
+					 const char **translated_string);
 
 /** Helper function that returns the current module */
-MODULE_EXTERN obs_module_t EXPORT_VISIBILITY *obs_current_module(void);
+MODULE_EXTERN obs_module_t *obs_current_module(void);
 
 /**
  * Returns the location to a module data file associated with the current
@@ -169,12 +170,15 @@ MODULE_EXTERN obs_module_t EXPORT_VISIBILITY *obs_current_module(void);
  *
  * @param name Author name(s)
  */
-#define OBS_MODULE_AUTHOR(name) \
-	MODULE_EXPORT const char EXPORT_VISIBILITY *obs_module_author(void); \
-	const char *obs_module_author(void) {return name;}
+#define OBS_MODULE_AUTHOR(name)                            \
+	MODULE_EXPORT const char *obs_module_author(void); \
+	const char *obs_module_author(void)                \
+	{                                                  \
+		return name;                               \
+	}
 
 /** Optional: Returns the full name of the module */
-MODULE_EXPORT const char EXPORT_VISIBILITY *obs_module_name(void);
+MODULE_EXPORT const char *obs_module_name(void);
 
 /** Optional: Returns a description of the module */
-MODULE_EXPORT const char EXPORT_VISIBILITY *obs_module_description(void);
+MODULE_EXPORT const char *obs_module_description(void);

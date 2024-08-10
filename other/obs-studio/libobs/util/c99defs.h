@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,61 +18,60 @@
 
 /*
  * Contains hacks for getting some C99 stuff working in VC, things like
- * bool, inline, stdint
+ * bool, stdint
  */
 
 #define UNUSED_PARAMETER(param) (void)param
 
 #ifdef _MSC_VER
-#define DEPRECATED __declspec(deprecated)
+#define _OBS_DEPRECATED __declspec(deprecated)
+#define OBS_NORETURN __declspec(noreturn)
 #define FORCE_INLINE __forceinline
 #else
-#define DEPRECATED __attribute__ ((deprecated))
+#define _OBS_DEPRECATED __attribute__((deprecated))
+#define OBS_NORETURN __attribute__((noreturn))
 #define FORCE_INLINE inline __attribute__((always_inline))
 #endif
 
-#ifdef _MSC_VER
-
-/* Microsoft is one of the most inept companies on the face of the planet.
- * The fact that even visual studio 2013 doesn't support the standard 'inline'
- * keyword is so incredibly stupid that I just can't imagine what sort of
- * incredibly inept moron could possibly be managing the visual C compiler
- * project.  They should be fired, and legally forbidden to have a job in
- * ANYTHING even REMOTELY related to programming.  FOREVER.  This should also
- * apply to the next 10 generations all of their descendants. */
-#ifndef __cplusplus
-#define inline __inline
+#if defined(SWIG_TYPE_TABLE)
+#define OBS_DEPRECATED
+#else
+#define OBS_DEPRECATED _OBS_DEPRECATED
 #endif
 
+#if defined(IS_LIBOBS)
+#define OBS_EXTERNAL_DEPRECATED
+#else
+#define OBS_EXTERNAL_DEPRECATED OBS_DEPRECATED
+#endif
+
+#ifdef _MSC_VER
 #define EXPORT __declspec(dllexport)
 #else
-#define EXPORT
+#define EXPORT __attribute__((visibility("default")))
 #endif
 
-#if _MSC_VER && _MSC_VER < 0x0708
-
-#include "vc/vc_stdint.h"
-#include "vc/vc_stdbool.h"
-
-#ifndef __off_t_defined
-#define __off_t_defined
-#if _FILE_OFFSET_BITS == 64
-typedef long long off_t;
+#ifdef _MSC_VER
+#define PRAGMA_WARN_PUSH _Pragma("warning(push)")
+#define PRAGMA_WARN_POP _Pragma("warning(pop)")
+#define PRAGMA_WARN_DEPRECATION _Pragma("warning(disable: 4996)")
+#elif defined(__clang__)
+#define PRAGMA_WARN_PUSH _Pragma("clang diagnostic push")
+#define PRAGMA_WARN_POP _Pragma("clang diagnostic pop")
+#define PRAGMA_WARN_DEPRECATION \
+	_Pragma("clang diagnostic warning \"-Wdeprecated-declarations\"")
+#elif defined(__GNUC__)
+#define PRAGMA_WARN_PUSH _Pragma("GCC diagnostic push")
+#define PRAGMA_WARN_POP _Pragma("GCC diagnostic pop")
+#define PRAGMA_WARN_DEPRECATION \
+	_Pragma("GCC diagnostic warning \"-Wdeprecated-declarations\"")
 #else
-typedef long off_t;
+#define PRAGMA_WARN_PUSH
+#define PRAGMA_WARN_POP
+#define PRAGMA_WARN_DEPRECATION
 #endif
-typedef int64_t off64_t;
-#endif /* __off_t_defined */
-
-#define SIZE_T_FORMAT "%u"
-
-#else
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
-
-#define SIZE_T_FORMAT "%zu"
-
-#endif /* _MSC_VER */

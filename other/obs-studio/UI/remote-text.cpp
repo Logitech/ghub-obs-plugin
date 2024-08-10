@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2015 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -15,14 +15,16 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
-#include <curl/curl.h>
+#include <util/curl/curl-helper.h>
+#include <qt-wrappers.hpp>
 #include "obs-app.hpp"
-#include "qt-wrappers.hpp"
 #include "remote-text.hpp"
 
 using namespace std;
 
-static auto curl_deleter = [] (CURL *curl) {curl_easy_cleanup(curl);};
+static auto curl_deleter = [](CURL *curl) {
+	curl_easy_cleanup(curl);
+};
 using Curl = unique_ptr<CURL, decltype(curl_deleter)>;
 
 static size_t string_write(char *ptr, size_t size, size_t nmemb, string &str)
@@ -53,36 +55,40 @@ void RemoteTextThread::run()
 		struct curl_slist *header = nullptr;
 		string str;
 
-		header = curl_slist_append(header,
-				versionString.c_str());
+		header = curl_slist_append(header, versionString.c_str());
 
 		if (!contentTypeString.empty()) {
 			header = curl_slist_append(header,
-					contentTypeString.c_str());
+						   contentTypeString.c_str());
 		}
 
-		curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER,
-				header);
-		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER,
-				error);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION,
-				string_write);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA,
-				&str);
+		for (std::string &h : extraHeaders)
+			header = curl_slist_append(header, h.c_str());
 
-#if LIBCURL_VERSION_NUM >= 0x072400
-		// A lot of servers don't yet support ALPN
-		curl_easy_setopt(curl.get(), CURLOPT_SSL_ENABLE_ALPN, 0);
-#endif
+		curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
+		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header);
+		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error);
+		curl_easy_setopt(curl.get(), CURLOPT_FAILONERROR, 1L);
+		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION,
+				 string_write);
+		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &str);
+		curl_obs_set_revoke_setting(curl.get());
+
+		if (timeoutSec)
+			curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT,
+					 timeoutSec);
 
 		if (!postData.empty()) {
 			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS,
-					postData.c_str());
+					 postData.c_str());
 		}
 
 		code = curl_easy_perform(curl.get());
 		if (code != CURLE_OK) {
+			blog(LOG_WARNING,
+			     "RemoteTextThread: HTTP request failed. %s",
+			     strlen(error) ? error : curl_easy_strerror(code));
 			emit Result(QString(), QT_UTF8(error));
 		} else {
 			emit Result(QT_UTF8(str.c_str()), QString());
@@ -93,7 +99,7 @@ void RemoteTextThread::run()
 }
 
 static size_t header_write(char *ptr, size_t size, size_t nmemb,
-		vector<string> &list)
+			   vector<string> &list)
 {
 	string str;
 
@@ -110,15 +116,12 @@ static size_t header_write(char *ptr, size_t size, size_t nmemb,
 	return total;
 }
 
-bool GetRemoteFile(
-	const char *url,
-	std::string &str,
-	std::string &error,
-	long *responseCode,
-	const char *contentType,
-	const char *postData,
-	std::vector<std::string> extraHeaders,
-	std::string *signature)
+bool GetRemoteFile(const char *url, std::string &str, std::string &error,
+		   long *responseCode, const char *contentType,
+		   std::string request_type, const char *postData,
+		   std::vector<std::string> extraHeaders,
+		   std::string *signature, int timeoutSec, bool fail_on_error,
+		   int postDataSize)
 {
 	vector<string> header_in_list;
 	char error_in[CURL_ERROR_SIZE];
@@ -139,54 +142,77 @@ bool GetRemoteFile(
 	if (curl) {
 		struct curl_slist *header = nullptr;
 
-		header = curl_slist_append(header,
-				versionString.c_str());
+		header = curl_slist_append(header, versionString.c_str());
 
 		if (!contentTypeString.empty()) {
 			header = curl_slist_append(header,
-					contentTypeString.c_str());
+						   contentTypeString.c_str());
 		}
 
 		for (std::string &h : extraHeaders)
 			header = curl_slist_append(header, h.c_str());
 
 		curl_easy_setopt(curl.get(), CURLOPT_URL, url);
-		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER,
-				header);
-		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER,
-				error_in);
+		curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
+		curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header);
+		curl_easy_setopt(curl.get(), CURLOPT_ERRORBUFFER, error_in);
+		if (fail_on_error)
+			curl_easy_setopt(curl.get(), CURLOPT_FAILONERROR, 1L);
 		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION,
-				string_write);
-		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA,
-				&str);
+				 string_write);
+		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &str);
+		curl_obs_set_revoke_setting(curl.get());
+
 		if (signature) {
 			curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION,
-					header_write);
+					 header_write);
 			curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA,
-					&header_in_list);
+					 &header_in_list);
 		}
 
-#if LIBCURL_VERSION_NUM >= 0x072400
-		// A lot of servers don't yet support ALPN
-		curl_easy_setopt(curl.get(), CURLOPT_SSL_ENABLE_ALPN, 0);
-#endif
+		if (timeoutSec)
+			curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT,
+					 timeoutSec);
 
+		if (!request_type.empty()) {
+			if (request_type != "GET")
+				curl_easy_setopt(curl.get(),
+						 CURLOPT_CUSTOMREQUEST,
+						 request_type.c_str());
+
+			// Special case of "POST"
+			if (request_type == "POST") {
+				curl_easy_setopt(curl.get(), CURLOPT_POST, 1);
+				if (!postData)
+					curl_easy_setopt(curl.get(),
+							 CURLOPT_POSTFIELDS,
+							 "{}");
+			}
+		}
 		if (postData) {
+			if (postDataSize > 0) {
+				curl_easy_setopt(curl.get(),
+						 CURLOPT_POSTFIELDSIZE,
+						 (long)postDataSize);
+			}
 			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS,
-					postData);
+					 postData);
 		}
 
 		code = curl_easy_perform(curl.get());
 		if (responseCode)
 			curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE,
-					responseCode);
+					  responseCode);
 
 		if (code != CURLE_OK) {
-			error = error_in;
+			error = strlen(error_in) ? error_in
+						 : curl_easy_strerror(code);
 		} else if (signature) {
 			for (string &h : header_in_list) {
 				string name = h.substr(0, 13);
-				if (name == "X-Signature: ") {
+				// HTTP headers are technically case-insensitive
+				if (name == "X-Signature: " ||
+				    name == "x-signature: ") {
 					*signature = h.substr(13);
 					break;
 				}

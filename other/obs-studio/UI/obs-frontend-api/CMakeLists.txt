@@ -1,29 +1,29 @@
-project(obs-frontend-api)
+cmake_minimum_required(VERSION 3.22...3.25)
 
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/libobs")
+legacy_check()
 
-add_definitions(-DLIBOBS_EXPORTS)
+add_library(obs-frontend-api SHARED)
+add_library(OBS::frontend-api ALIAS obs-frontend-api)
 
-set(obs-frontend-api_SOURCES
-	obs-frontend-api.cpp)
+target_sources(obs-frontend-api PRIVATE obs-frontend-api.h obs-frontend-api.cpp obs-frontend-internal.hpp)
 
-set(obs-frontend-api_HEADERS
-	obs-frontend-internal.hpp
-	obs-frontend-api.h)
+target_link_libraries(obs-frontend-api PRIVATE OBS::libobs)
 
-add_library(obs-frontend-api SHARED
-	${obs-frontend-api_SOURCES}
-	${obs-frontend-api_HEADERS})
-target_link_libraries(obs-frontend-api
-	libobs)
+target_include_directories(obs-frontend-api PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>")
 
-if(UNIX AND NOT APPLE)
-	set_target_properties(obs-frontend-api
-		PROPERTIES
-			OUTPUT_NAME obs-frontend-api
-			VERSION 0.0
-			SOVERSION 0
-			)
+if(OS_WINDOWS)
+  configure_file(cmake/windows/obs-module.rc.in obs-frontend-api.rc)
+  target_sources(obs-frontend-api PRIVATE obs-frontend-api.rc)
+elseif(OS_MACOS)
+  set_target_properties(obs-frontend-api PROPERTIES SOVERSION 1)
 endif()
 
-install_obs_core(obs-frontend-api)
+# cmake-format: off
+set_target_properties_obs(obs-frontend-api PROPERTIES FOLDER frontend PUBLIC_HEADER obs-frontend-api.h)
+
+if (OS_WINDOWS OR OS_MACOS)
+  set_property(TARGET obs-frontend-api PROPERTY PREFIX "")
+endif()
+# cmake-format: on
+
+target_export(obs-frontend-api)

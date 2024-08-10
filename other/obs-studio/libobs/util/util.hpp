@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,6 +20,7 @@
 
 #include <string.h>
 #include <stdarg.h>
+#include <utility>
 
 #include "bmem.h"
 #include "config-file.h"
@@ -30,42 +31,57 @@
 template<typename T> class BPtr {
 	T *ptr;
 
-	BPtr(BPtr const&) = delete;
+	BPtr(BPtr const &) = delete;
 
-	BPtr &operator=(BPtr const&) = delete;
+	BPtr &operator=(BPtr const &) = delete;
 
 public:
-	inline BPtr(T *p=nullptr) : ptr(p)         {}
-	inline BPtr(BPtr &&other) : ptr(other.ptr) {other.ptr = nullptr;}
-	inline ~BPtr()                             {bfree(ptr);}
+	inline BPtr(T *p = nullptr) : ptr(p) {}
+	inline BPtr(BPtr &&other) { *this = std::move(other); }
+	inline ~BPtr() { bfree(ptr); }
 
-	inline T *operator=(T *p)   {bfree(ptr); ptr = p; return p;}
-	inline operator T*()        {return ptr;}
-	inline T **operator&()      {bfree(ptr); ptr = nullptr; return &ptr;}
+	inline T *operator=(T *p)
+	{
+		bfree(ptr);
+		ptr = p;
+		return p;
+	}
 
-	inline bool operator!()     {return ptr == NULL;}
-	inline bool operator==(T p) {return ptr == p;}
-	inline bool operator!=(T p) {return ptr != p;}
+	inline BPtr &operator=(BPtr &&other)
+	{
+		ptr = other.ptr;
+		other.ptr = nullptr;
+		return *this;
+	}
 
-	inline T *Get() const       {return ptr;}
+	inline operator T *() { return ptr; }
+	inline T **operator&()
+	{
+		bfree(ptr);
+		ptr = nullptr;
+		return &ptr;
+	}
+
+	inline bool operator!() { return ptr == NULL; }
+	inline bool operator==(T p) { return ptr == p; }
+	inline bool operator!=(T p) { return ptr != p; }
+
+	inline T *Get() const { return ptr; }
 };
 
 class ConfigFile {
 	config_t *config;
 
-	ConfigFile(ConfigFile const&) = delete;
-	ConfigFile &operator=(ConfigFile const&) = delete;
+	ConfigFile(ConfigFile const &) = delete;
+	ConfigFile &operator=(ConfigFile const &) = delete;
 
 public:
 	inline ConfigFile() : config(NULL) {}
-	inline ConfigFile(ConfigFile &&other) : config(other.config)
+	inline ConfigFile(ConfigFile &&other) noexcept : config(other.config)
 	{
 		other.config = nullptr;
 	}
-	inline ~ConfigFile()
-	{
-		config_close(config);
-	}
+	inline ~ConfigFile() { config_close(config); }
 
 	inline bool Create(const char *file)
 	{
@@ -81,19 +97,22 @@ public:
 		config = newConfig;
 	}
 
+	inline int OpenString(const char *str)
+	{
+		Close();
+		return config_open_string(&config, str);
+	}
+
 	inline int Open(const char *file, config_open_type openType)
 	{
 		Close();
 		return config_open(&config, file, openType);
 	}
 
-	inline int Save()
-	{
-		return config_save(config);
-	}
+	inline int Save() { return config_save(config); }
 
 	inline int SaveSafe(const char *temp_ext,
-			const char *backup_ext = nullptr)
+			    const char *backup_ext = nullptr)
 	{
 		return config_save_safe(config, temp_ext, backup_ext);
 	}
@@ -104,32 +123,32 @@ public:
 		config = NULL;
 	}
 
-	inline operator config_t*() const {return config;}
+	inline operator config_t *() const { return config; }
 };
 
 class TextLookup {
 	lookup_t *lookup;
 
-	TextLookup(TextLookup const&) = delete;
+	TextLookup(TextLookup const &) = delete;
 
-	TextLookup &operator=(TextLookup const&) = delete;
+	TextLookup &operator=(TextLookup const &) = delete;
 
 public:
-	inline TextLookup(lookup_t *lookup=nullptr) : lookup(lookup) {}
-	inline TextLookup(TextLookup &&other) : lookup(other.lookup)
+	inline TextLookup(lookup_t *lookup = nullptr) : lookup(lookup) {}
+	inline TextLookup(TextLookup &&other) noexcept : lookup(other.lookup)
 	{
 		other.lookup = nullptr;
 	}
-	inline ~TextLookup() {text_lookup_destroy(lookup);}
+	inline ~TextLookup() { text_lookup_destroy(lookup); }
 
-	inline TextLookup& operator=(lookup_t *val)
+	inline TextLookup &operator=(lookup_t *val)
 	{
 		text_lookup_destroy(lookup);
 		lookup = val;
 		return *this;
 	}
 
-	inline operator lookup_t*() const {return lookup;}
+	inline operator lookup_t *() const { return lookup; }
 
 	inline const char *GetString(const char *lookupVal) const
 	{

@@ -79,7 +79,7 @@ void pulseaudio_wait();
 /**
  * Wait for accept signal from calling thread
  *
- * This function tells the pulseaudio mainloop wheter the data provided to
+ * This function tells the pulseaudio mainloop whether the data provided to
  * the callback should be retained until the calling thread executes
  * pulseaudio_accept()
  *
@@ -107,7 +107,7 @@ void pulseaudio_accept();
  * @warning call without active locks
  */
 int_fast32_t pulseaudio_get_source_info_list(pa_source_info_cb_t cb,
-		void *userdata);
+					     void *userdata);
 
 /**
  * Request source information from a specific source
@@ -126,7 +126,41 @@ int_fast32_t pulseaudio_get_source_info_list(pa_source_info_cb_t cb,
  * @warning call without active locks
  */
 int_fast32_t pulseaudio_get_source_info(pa_source_info_cb_t cb,
-		const char *name, void *userdata);
+					const char *name, void *userdata);
+
+/**
+ * Request sink information
+ *
+ * The function will block until the operation was executed and the mainloop
+ * called the provided callback function.
+ *
+ * @return negative on error
+ *
+ * @note The function will block until the server context is ready.
+ *
+ * @warning call without active locks
+ */
+int_fast32_t pulseaudio_get_sink_info_list(pa_sink_info_cb_t cb,
+					   void *userdata);
+
+/**
+ * Request sink information from a specific sink
+ *
+ * The function will block until the operation was executed and the mainloop
+ * called the provided callback function.
+ *
+ * @param cb pointer to the callback function
+ * @param name the sink name to get information for
+ * @param userdata pointer to userdata the callback will be called with
+ *
+ * @return negative on error
+ *
+ * @note The function will block until the server context is ready.
+ *
+ * @warning call without active locks
+ */
+int_fast32_t pulseaudio_get_sink_info(pa_sink_info_cb_t cb, const char *name,
+				      void *userdata);
 
 /**
  * Request server information
@@ -150,7 +184,7 @@ int_fast32_t pulseaudio_get_server_info(pa_server_info_cb_t cb, void *userdata);
  * @warning call without active locks
  */
 pa_stream *pulseaudio_stream_new(const char *name, const pa_sample_spec *ss,
-		const pa_channel_map *map);
+				 const pa_channel_map *map);
 
 /**
  * Connect to a pulseaudio playback stream
@@ -162,7 +196,8 @@ pa_stream *pulseaudio_stream_new(const char *name, const pa_sample_spec *ss,
  * @return negative on error
  */
 int_fast32_t pulseaudio_connect_playback(pa_stream *s, const char *name,
-		const pa_buffer_attr *attr, pa_stream_flags_t flags);
+					 const pa_buffer_attr *attr,
+					 pa_stream_flags_t flags);
 
 /**
  * Sets a callback function for when data can be written to the stream
@@ -172,7 +207,7 @@ int_fast32_t pulseaudio_connect_playback(pa_stream *s, const char *name,
  * @param userdata pointer to userdata the callback will be called with
  */
 void pulseaudio_write_callback(pa_stream *p, pa_stream_request_cb_t cb,
-		void *userdata);
+			       void *userdata);
 
 /**
  * Sets a callback function for when an underflow happen
@@ -182,4 +217,4 @@ void pulseaudio_write_callback(pa_stream *p, pa_stream_request_cb_t cb,
  * @param userdata pointer to userdata the callback will be called with
  */
 void pulseaudio_set_underflow_callback(pa_stream *p, pa_stream_notify_cb_t cb,
-		void *userdata);
+				       void *userdata);

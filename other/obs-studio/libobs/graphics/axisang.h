@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2013 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,7 +27,9 @@ struct quat;
 
 struct axisang {
 	union {
-		struct {float x, y, z, w;};
+		struct {
+			float x, y, z, w;
+		};
 		float ptr[4];
 	};
 };
@@ -49,7 +51,7 @@ static inline void axisang_copy(struct axisang *dst, struct axisang *aa)
 }
 
 static inline void axisang_set(struct axisang *dst, float x, float y, float z,
-		float w)
+			       float w)
 {
 	dst->x = x;
 	dst->y = y;

@@ -111,7 +111,7 @@ function script_properties()
 	local sources = obs.obs_enum_sources()
 	if sources ~= nil then
 		for _, source in ipairs(sources) do
-			source_id = obs.obs_source_get_id(source)
+			source_id = obs.obs_source_get_unversioned_id(source)
 			if source_id == "text_gdiplus" or source_id == "text_ft2_source" then
 				local name = obs.obs_source_get_name(source)
 				obs.obs_property_list_add_string(p, name, name)
@@ -129,7 +129,7 @@ end
 -- A function named script_description returns the description shown to
 -- the user
 function script_description()
-	return "Sets a text source to act as a countdown timer when the source is active.\n\nMade by Jim"
+	return "Sets a text source to act as a countdown timer when the source is active.\n\nMade by Lain"
 end
 
 -- A function named script_update will be called when settings are changed

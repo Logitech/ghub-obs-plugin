@@ -5,7 +5,9 @@ add_definitions(-DWIN32_LEAN_AND_MEAN)
 add_definitions(-D_SCL_SECURE_NO_WARNINGS)
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG")
 
-set(APPLET_NAME "logi_obs_plugin")
+set(PLUGIN_NAME "logi_obs")
+set(APPLET_NAME "${PLUGIN_NAME}_plugin")
+set(BUNDLE_NAME "${PLUGIN_NAME}.plugin")
 
 set(SOURCES
     src/obs_plugin.cpp)
@@ -45,7 +47,12 @@ if(WIN32)
         set_target_properties(logi_applets_obs_plugin PROPERTIES OUTPUT_NAME "${APPLET_NAME}_x64")
     endif()
 elseif(APPLE)
-    set_target_properties(logi_applets_obs_plugin PROPERTIES OUTPUT_NAME "${APPLET_NAME}")
+    set_target_properties(logi_applets_obs_plugin PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${BUNDLE_NAME}/Contents/MacOS
+        OUTPUT_NAME "${PLUGIN_NAME}"
+        PREFIX ""
+        SUFFIX ""
+    )
 endif()
 
 get_filename_component(DEPS_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)

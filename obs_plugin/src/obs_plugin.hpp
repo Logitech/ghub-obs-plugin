@@ -173,7 +173,7 @@ namespace logi
             std::condition_variable m_initialization_cv;
 
             // clang-format off
-            const std::string s_integration_name            = "OBS";
+            const std::string s_integration_name            = "APPLET_OBS_NAME";
             const std::string s_integration_author          = "Logitech G";
             const std::string s_integration_description     = "A Logitech G plugin for Open Broadcaster Software, exposing additional actions to G HUB.";
             const std::string s_integration_identifier      = "logi_obs_plugin";

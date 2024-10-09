@@ -49,6 +49,8 @@ if(WIN32)
 elseif(APPLE)
     set_target_properties(logi_applets_obs_plugin PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/logi/applets/ghub-obs-plugin/${BUNDLE_NAME}/Contents/MacOS
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/logi/applets/ghub-obs-plugin/${BUNDLE_NAME}/Contents/MacOS
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/logi/applets/ghub-obs-plugin/${BUNDLE_NAME}/Contents/MacOS
         OUTPUT_NAME "${PLUGIN_NAME}"
         PREFIX ""
         SUFFIX ""

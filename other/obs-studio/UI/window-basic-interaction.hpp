@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2014 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,8 +22,7 @@
 #include <functional>
 
 #include <obs.hpp>
-
-#include "properties-view.hpp"
+#include <properties-view.hpp>
 
 class OBSBasic;
 
@@ -35,12 +34,12 @@ class OBSBasicInteraction : public QDialog {
 	Q_OBJECT
 
 private:
-	OBSBasic   *main;
+	OBSBasic *main;
 
 	std::unique_ptr<Ui::OBSBasicInteraction> ui;
-	OBSSource  source;
-	OBSSignal  removedSignal;
-	OBSSignal  renamedSignal;
+	OBSSource source;
+	OBSSignal removedSignal;
+	OBSSignal renamedSignal;
 	std::unique_ptr<OBSEventFilter> eventFilter;
 
 	static void SourceRemoved(void *data, calldata_t *params);
@@ -65,17 +64,16 @@ public:
 
 protected:
 	virtual void closeEvent(QCloseEvent *event) override;
+	virtual bool nativeEvent(const QByteArray &eventType, void *message,
+				 qintptr *result) override;
 };
 
 typedef std::function<bool(QObject *, QEvent *)> EventFilterFunc;
 
-class OBSEventFilter : public QObject
-{
+class OBSEventFilter : public QObject {
 	Q_OBJECT
 public:
-	OBSEventFilter(EventFilterFunc filter_)
-		: filter(filter_)
-	{}
+	OBSEventFilter(EventFilterFunc filter_) : filter(filter_) {}
 
 protected:
 	bool eventFilter(QObject *obj, QEvent *event)
@@ -83,6 +81,6 @@ protected:
 		return filter(obj, event);
 	}
 
-private:
+public:
 	EventFilterFunc filter;
 };

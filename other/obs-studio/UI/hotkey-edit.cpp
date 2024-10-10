@@ -15,26 +15,16 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
+#include "window-basic-settings.hpp"
 #include "hotkey-edit.hpp"
 
 #include <util/dstr.hpp>
 #include <QPointer>
 #include <QStyle>
+#include <QAction>
+#include <qt-wrappers.hpp>
 
 #include "obs-app.hpp"
-#include "qt-wrappers.hpp"
-
-static inline bool operator!=(const obs_key_combination_t &c1,
-		const obs_key_combination_t &c2)
-{
-	return c1.modifiers != c2.modifiers || c1.key != c2.key;
-}
-
-static inline bool operator==(const obs_key_combination_t &c1,
-		const obs_key_combination_t &c2)
-{
-	return !(c1 != c2);
-}
 
 void OBSHotkeyEdit::keyPressEvent(QKeyEvent *event)
 {
@@ -69,6 +59,15 @@ void OBSHotkeyEdit::keyPressEvent(QKeyEvent *event)
 	HandleNewKey(new_key);
 }
 
+QVariant OBSHotkeyEdit::inputMethodQuery(Qt::InputMethodQuery query) const
+{
+	if (query == Qt::ImEnabled) {
+		return false;
+	} else {
+		return QLineEdit::inputMethodQuery(query);
+	}
+}
+
 #ifdef __APPLE__
 void OBSHotkeyEdit::keyReleaseEvent(QKeyEvent *event)
 {
@@ -101,36 +100,38 @@ void OBSHotkeyEdit::mousePressEvent(QMouseEvent *event)
 	case Qt::MouseButtonMask:
 		return;
 
-	case Qt::MidButton:
+	case Qt::MiddleButton:
 		new_key.key = OBS_KEY_MOUSE3;
 		break;
 
-#define MAP_BUTTON(i, j) case Qt::ExtraButton ## i: \
-		new_key.key = OBS_KEY_MOUSE ## j; break;
-	MAP_BUTTON( 1,  4);
-	MAP_BUTTON( 2,  5);
-	MAP_BUTTON( 3,  6);
-	MAP_BUTTON( 4,  7);
-	MAP_BUTTON( 5,  8);
-	MAP_BUTTON( 6,  9);
-	MAP_BUTTON( 7, 10);
-	MAP_BUTTON( 8, 11);
-	MAP_BUTTON( 9, 12);
-	MAP_BUTTON(10, 13);
-	MAP_BUTTON(11, 14);
-	MAP_BUTTON(12, 15);
-	MAP_BUTTON(13, 16);
-	MAP_BUTTON(14, 17);
-	MAP_BUTTON(15, 18);
-	MAP_BUTTON(16, 19);
-	MAP_BUTTON(17, 20);
-	MAP_BUTTON(18, 21);
-	MAP_BUTTON(19, 22);
-	MAP_BUTTON(20, 23);
-	MAP_BUTTON(21, 24);
-	MAP_BUTTON(22, 25);
-	MAP_BUTTON(23, 26);
-	MAP_BUTTON(24, 27);
+#define MAP_BUTTON(i, j)                        \
+	case Qt::ExtraButton##i:                \
+		new_key.key = OBS_KEY_MOUSE##j; \
+		break;
+		MAP_BUTTON(1, 4)
+		MAP_BUTTON(2, 5)
+		MAP_BUTTON(3, 6)
+		MAP_BUTTON(4, 7)
+		MAP_BUTTON(5, 8)
+		MAP_BUTTON(6, 9)
+		MAP_BUTTON(7, 10)
+		MAP_BUTTON(8, 11)
+		MAP_BUTTON(9, 12)
+		MAP_BUTTON(10, 13)
+		MAP_BUTTON(11, 14)
+		MAP_BUTTON(12, 15)
+		MAP_BUTTON(13, 16)
+		MAP_BUTTON(14, 17)
+		MAP_BUTTON(15, 18)
+		MAP_BUTTON(16, 19)
+		MAP_BUTTON(17, 20)
+		MAP_BUTTON(18, 21)
+		MAP_BUTTON(19, 22)
+		MAP_BUTTON(20, 23)
+		MAP_BUTTON(21, 24)
+		MAP_BUTTON(22, 25)
+		MAP_BUTTON(23, 26)
+		MAP_BUTTON(24, 27)
 #undef MAP_BUTTON
 	}
 
@@ -181,15 +182,39 @@ void OBSHotkeyEdit::ClearKey()
 	RenderKey();
 }
 
+void OBSHotkeyEdit::UpdateDuplicationState()
+{
+	if (!dupeIcon && !hasDuplicate)
+		return;
+
+	if (!dupeIcon)
+		CreateDupeIcon();
+
+	if (dupeIcon->isVisible() != hasDuplicate) {
+		dupeIcon->setVisible(hasDuplicate);
+		update();
+	}
+}
+
 void OBSHotkeyEdit::InitSignalHandler()
 {
-	layoutChanged = {obs_get_signal_handler(),
-			"hotkey_layout_change",
-			[](void *this_, calldata_t*)
-	{
-		auto edit = static_cast<OBSHotkeyEdit*>(this_);
-		QMetaObject::invokeMethod(edit, "ReloadKeyLayout");
-	}, this};
+	layoutChanged = {
+		obs_get_signal_handler(), "hotkey_layout_change",
+		[](void *this_, calldata_t *) {
+			auto edit = static_cast<OBSHotkeyEdit *>(this_);
+			QMetaObject::invokeMethod(edit, "ReloadKeyLayout");
+		},
+		this};
+}
+
+void OBSHotkeyEdit::CreateDupeIcon()
+{
+	dupeIcon = addAction(settings->GetHotkeyConflictIcon(),
+			     ActionPosition::TrailingPosition);
+	dupeIcon->setToolTip(QTStr("Basic.Settings.Hotkeys.DuplicateWarning"));
+	QObject::connect(dupeIcon, &QAction::triggered,
+			 [=] { emit SearchKey(key); });
+	dupeIcon->setVisible(false);
 }
 
 void OBSHotkeyEdit::ReloadKeyLayout()
@@ -198,7 +223,7 @@ void OBSHotkeyEdit::ReloadKeyLayout()
 }
 
 void OBSHotkeyWidget::SetKeyCombinations(
-		const std::vector<obs_key_combination_t> &combos)
+	const std::vector<obs_key_combination_t> &combos)
 {
 	if (combos.empty())
 		AddEdit({0, OBS_KEY_NONE});
@@ -210,10 +235,8 @@ void OBSHotkeyWidget::SetKeyCombinations(
 bool OBSHotkeyWidget::Changed() const
 {
 	return changed ||
-		std::any_of(begin(edits), end(edits), [](OBSHotkeyEdit *edit)
-	{
-		return edit->changed;
-	});
+	       std::any_of(begin(edits), end(edits),
+			   [](OBSHotkeyEdit *edit) { return edit->changed; });
 }
 
 void OBSHotkeyWidget::Apply()
@@ -230,7 +253,7 @@ void OBSHotkeyWidget::Apply()
 }
 
 void OBSHotkeyWidget::GetCombinations(
-		std::vector<obs_key_combination_t> &combinations) const
+	std::vector<obs_key_combination_t> &combinations) const
 {
 	combinations.clear();
 	for (auto &edit : edits)
@@ -249,77 +272,68 @@ void OBSHotkeyWidget::Save(std::vector<obs_key_combination_t> &combinations)
 	GetCombinations(combinations);
 	Apply();
 
-	auto AtomicUpdate = [&]()
-	{
+	auto AtomicUpdate = [&]() {
 		ignoreChangedBindings = true;
 
-		obs_hotkey_load_bindings(id,
-				combinations.data(), combinations.size());
+		obs_hotkey_load_bindings(id, combinations.data(),
+					 combinations.size());
 
 		ignoreChangedBindings = false;
 	};
 	using AtomicUpdate_t = decltype(&AtomicUpdate);
 
-	obs_hotkey_update_atomic([](void *d)
-	{
-		(*static_cast<AtomicUpdate_t>(d))();
-	}, static_cast<void*>(&AtomicUpdate));
+	obs_hotkey_update_atomic(
+		[](void *d) { (*static_cast<AtomicUpdate_t>(d))(); },
+		static_cast<void *>(&AtomicUpdate));
 }
 
 void OBSHotkeyWidget::AddEdit(obs_key_combination combo, int idx)
 {
-	auto edit = new OBSHotkeyEdit(combo);
+	auto edit = new OBSHotkeyEdit(parentWidget(), combo, settings);
 	edit->setToolTip(toolTip);
 
 	auto revert = new QPushButton;
-	revert->setProperty("themeID", "hotkeyButtons");
-	revert->setText(QTStr("Revert"));
+	revert->setProperty("themeID", "revertIcon");
+	revert->setToolTip(QTStr("Revert"));
 	revert->setEnabled(false);
 
 	auto clear = new QPushButton;
-	clear->setProperty("themeID", "hotkeyButtons");
-	clear->setText(QTStr("Clear"));
+	clear->setProperty("themeID", "clearIconSmall");
+	clear->setToolTip(QTStr("Clear"));
 	clear->setEnabled(!obs_key_combination_is_empty(combo));
 
-	QObject::connect(edit, &OBSHotkeyEdit::KeyChanged,
-			[=](obs_key_combination_t new_combo)
-	{
-		clear->setEnabled(!obs_key_combination_is_empty(new_combo));
-		revert->setEnabled(edit->original != new_combo);
-	});
+	QObject::connect(
+		edit, &OBSHotkeyEdit::KeyChanged,
+		[=](obs_key_combination_t new_combo) {
+			clear->setEnabled(
+				!obs_key_combination_is_empty(new_combo));
+			revert->setEnabled(edit->original != new_combo);
+		});
 
 	auto add = new QPushButton;
-	add->setProperty("themeID", "hotkeyButtons");
-	add->setText("+");
-	add->setMinimumWidth(50);
+	add->setProperty("themeID", "addIconSmall");
+	add->setToolTip(QTStr("Add"));
 
 	auto remove = new QPushButton;
-	remove->setProperty("themeID", "hotkeyButtons");
-	remove->setText("-");
+	remove->setProperty("themeID", "removeIconSmall");
+	remove->setToolTip(QTStr("Remove"));
 	remove->setEnabled(removeButtons.size() > 0);
-	remove->setMinimumWidth(50);
 
-	auto CurrentIndex = [&, remove]
-	{
-		auto res = std::find(begin(removeButtons),
-					end(removeButtons),
-					remove);
+	auto CurrentIndex = [&, remove] {
+		auto res = std::find(begin(removeButtons), end(removeButtons),
+				     remove);
 		return std::distance(begin(removeButtons), res);
 	};
 
-	QObject::connect(add, &QPushButton::clicked,
-			[&, CurrentIndex]
-	{
+	QObject::connect(add, &QPushButton::clicked, [&, CurrentIndex] {
 		AddEdit({0, OBS_KEY_NONE}, CurrentIndex() + 1);
 	});
 
 	QObject::connect(remove, &QPushButton::clicked,
-			[&, CurrentIndex]
-	{
-		RemoveEdit(CurrentIndex());
-	});
+			 [&, CurrentIndex] { RemoveEdit(CurrentIndex()); });
 
 	QHBoxLayout *subLayout = new QHBoxLayout;
+	subLayout->setContentsMargins(0, 2, 0, 2);
 	subLayout->addWidget(edit);
 	subLayout->addWidget(revert);
 	subLayout->addWidget(clear);
@@ -341,16 +355,17 @@ void OBSHotkeyWidget::AddEdit(obs_key_combination combo, int idx)
 
 	layout()->insertLayout(idx, subLayout);
 
-	QObject::connect(revert, &QPushButton::clicked,
-			edit, &OBSHotkeyEdit::ResetKey);
-	QObject::connect(clear, &QPushButton::clicked,
-			edit, &OBSHotkeyEdit::ClearKey);
+	QObject::connect(revert, &QPushButton::clicked, edit,
+			 &OBSHotkeyEdit::ResetKey);
+	QObject::connect(clear, &QPushButton::clicked, edit,
+			 &OBSHotkeyEdit::ClearKey);
 
 	QObject::connect(edit, &OBSHotkeyEdit::KeyChanged,
-			[&](obs_key_combination)
-	{
-		emit KeyChanged();
-	});
+			 [&](obs_key_combination) { emit KeyChanged(); });
+	QObject::connect(edit, &OBSHotkeyEdit::SearchKey,
+			 [=](obs_key_combination combo) {
+				 emit SearchKey(combo);
+			 });
 }
 
 void OBSHotkeyWidget::RemoveEdit(size_t idx, bool signal)
@@ -358,7 +373,6 @@ void OBSHotkeyWidget::RemoveEdit(size_t idx, bool signal)
 	auto &edit = *(begin(edits) + idx);
 	if (!obs_key_combination_is_empty(edit->original) && signal) {
 		changed = true;
-		emit KeyChanged();
 	}
 
 	revertButtons.erase(begin(revertButtons) + idx);
@@ -375,38 +389,41 @@ void OBSHotkeyWidget::RemoveEdit(size_t idx, bool signal)
 
 	if (removeButtons.size() == 1)
 		removeButtons.front()->setEnabled(false);
+
+	emit KeyChanged();
 }
 
 void OBSHotkeyWidget::BindingsChanged(void *data, calldata_t *param)
 {
-	auto widget = static_cast<OBSHotkeyWidget*>(data);
-	auto key    = static_cast<obs_hotkey_t*>(calldata_ptr(param, "key"));
+	auto widget = static_cast<OBSHotkeyWidget *>(data);
+	auto key = static_cast<obs_hotkey_t *>(calldata_ptr(param, "key"));
 
 	QMetaObject::invokeMethod(widget, "HandleChangedBindings",
-			Q_ARG(obs_hotkey_id, obs_hotkey_get_id(key)));
+				  Q_ARG(obs_hotkey_id, obs_hotkey_get_id(key)));
 }
 
 void OBSHotkeyWidget::HandleChangedBindings(obs_hotkey_id id_)
 {
-	if (ignoreChangedBindings || id != id_) return;
+	if (ignoreChangedBindings || id != id_)
+		return;
 
 	std::vector<obs_key_combination_t> bindings;
-	auto LoadBindings = [&](obs_hotkey_binding_t *binding)
-	{
-		if (obs_hotkey_binding_get_hotkey_id(binding) != id) return;
+	auto LoadBindings = [&](obs_hotkey_binding_t *binding) {
+		if (obs_hotkey_binding_get_hotkey_id(binding) != id)
+			return;
 
 		auto get_combo = obs_hotkey_binding_get_key_combination;
 		bindings.push_back(get_combo(binding));
 	};
 	using LoadBindings_t = decltype(&LoadBindings);
 
-	obs_enum_hotkey_bindings([](void *data,
-				size_t, obs_hotkey_binding_t *binding)
-	{
-		auto LoadBindings = *static_cast<LoadBindings_t>(data);
-		LoadBindings(binding);
-		return true;
-	}, static_cast<void*>(&LoadBindings));
+	obs_enum_hotkey_bindings(
+		[](void *data, size_t, obs_hotkey_binding_t *binding) {
+			auto LoadBindings = *static_cast<LoadBindings_t>(data);
+			LoadBindings(binding);
+			return true;
+		},
+		static_cast<void *>(&LoadBindings));
 
 	while (edits.size() > 0)
 		RemoveEdit(edits.size() - 1, false);
@@ -422,7 +439,7 @@ static inline void updateStyle(QWidget *widget)
 	widget->update();
 }
 
-void OBSHotkeyWidget::enterEvent(QEvent *event)
+void OBSHotkeyWidget::enterEvent(QEnterEvent *event)
 {
 	if (!label)
 		return;
@@ -451,8 +468,9 @@ void OBSHotkeyLabel::highlightPair(bool highlight)
 	updateStyle(this);
 }
 
-void OBSHotkeyLabel::enterEvent(QEvent *event)
+void OBSHotkeyLabel::enterEvent(QEnterEvent *event)
 {
+
 	if (!pairPartner)
 		return;
 

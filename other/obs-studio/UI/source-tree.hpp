@@ -5,29 +5,31 @@
 #include <QPointer>
 #include <QListView>
 #include <QCheckBox>
+#include <QStaticText>
+#include <QSvgRenderer>
 #include <QAbstractListModel>
+#include <QStyledItemDelegate>
+#include <obs.hpp>
+#include <obs-frontend-api.h>
 
 class QLabel;
+class OBSSourceLabel;
 class QCheckBox;
 class QLineEdit;
 class SourceTree;
 class QSpacerItem;
 class QHBoxLayout;
-class LockedCheckBox;
-class VisibilityCheckBox;
 class VisibilityItemWidget;
 
-class SourceTreeSubItemCheckBox : public QCheckBox {
-	Q_OBJECT
-};
-
-class SourceTreeItem : public QWidget {
+class SourceTreeItem : public QFrame {
 	Q_OBJECT
 
 	friend class SourceTree;
 	friend class SourceTreeModel;
 
 	void mouseDoubleClickEvent(QMouseEvent *event) override;
+	void enterEvent(QEnterEvent *event) override;
+	void leaveEvent(QEvent *event) override;
 
 	virtual bool eventFilter(QObject *object, QEvent *event) override;
 
@@ -47,33 +49,42 @@ class SourceTreeItem : public QWidget {
 
 public:
 	explicit SourceTreeItem(SourceTree *tree, OBSSceneItem sceneitem);
+	bool IsEditing();
 
 private:
 	QSpacerItem *spacer = nullptr;
 	QCheckBox *expand = nullptr;
-	VisibilityCheckBox *vis = nullptr;
-	LockedCheckBox *lock = nullptr;
+	QLabel *iconLabel = nullptr;
+	QCheckBox *vis = nullptr;
+	QCheckBox *lock = nullptr;
 	QHBoxLayout *boxLayout = nullptr;
-	QLabel *label = nullptr;
+	OBSSourceLabel *label = nullptr;
 
 	QLineEdit *editor = nullptr;
 
+	std::string newName;
+
 	SourceTree *tree;
 	OBSSceneItem sceneitem;
-	OBSSignal sceneRemoveSignal;
-	OBSSignal itemRemoveSignal;
-	OBSSignal visibleSignal;
-	OBSSignal renameSignal;
-	OBSSignal removeSignal;
+	std::vector<OBSSignal> sigs;
+
+	virtual void paintEvent(QPaintEvent *event) override;
+
+	void ExitEditModeInternal(bool save);
 
 private slots:
+	void Clear();
+
 	void EnterEditMode();
 	void ExitEditMode(bool save);
 
 	void VisibilityChanged(bool visible);
-	void Renamed(const QString &name);
+	void LockedChanged(bool locked);
 
 	void ExpandClicked(bool checked);
+
+	void Select();
+	void Deselect();
 };
 
 class SourceTreeModel : public QAbstractListModel {
@@ -107,10 +118,10 @@ class SourceTreeModel : public QAbstractListModel {
 
 public:
 	explicit SourceTreeModel(SourceTree *st);
-	~SourceTreeModel();
 
 	virtual int rowCount(const QModelIndex &parent) const override;
-	virtual QVariant data(const QModelIndex &index, int role) const override;
+	virtual QVariant data(const QModelIndex &index,
+			      int role) const override;
 
 	virtual Qt::ItemFlags flags(const QModelIndex &index) const override;
 	virtual Qt::DropActions supportedDropActions() const override;
@@ -124,6 +135,16 @@ class SourceTree : public QListView {
 	friend class SourceTreeModel;
 	friend class SourceTreeItem;
 
+	bool textPrepared = false;
+	QStaticText textNoSources;
+	QSvgRenderer iconNoSources;
+
+	OBSData undoSceneData;
+
+	bool iconsVisible = true;
+
+	void UpdateNoSourcesMessage();
+
 	void ResetWidgets();
 	void UpdateWidget(const QModelIndex &idx, obs_sceneitem_t *item);
 	void UpdateWidgets(bool force = false);
@@ -133,23 +154,21 @@ class SourceTree : public QListView {
 		return reinterpret_cast<SourceTreeModel *>(model());
 	}
 
+public:
 	inline SourceTreeItem *GetItemWidget(int idx)
 	{
 		QWidget *widget = indexWidget(GetStm()->createIndex(idx, 0));
 		return reinterpret_cast<SourceTreeItem *>(widget);
 	}
 
-public:
 	explicit SourceTree(QWidget *parent = nullptr);
 
-	inline bool IgnoreReorder() const {return ignoreReorder;}
-	inline void ReorderItems() {GetStm()->ReorderItems();}
-	inline void Clear() {GetStm()->Clear();}
+	inline bool IgnoreReorder() const { return ignoreReorder; }
+	inline void Clear() { GetStm()->Clear(); }
 
-	inline void Add(obs_sceneitem_t *item) {GetStm()->Add(item);}
-	inline void Remove(obs_sceneitem_t *item) {GetStm()->Remove(item);}
-	inline OBSSceneItem Get(int idx) {return GetStm()->Get(idx);}
-	inline QString GetNewGroupName() {return GetStm()->GetNewGroupName();}
+	inline void Add(obs_sceneitem_t *item) { GetStm()->Add(item); }
+	inline OBSSceneItem Get(int idx) { return GetStm()->Get(idx); }
+	inline QString GetNewGroupName() { return GetStm()->GetNewGroupName(); }
 
 	void SelectItem(obs_sceneitem_t *sceneitem, bool select);
 
@@ -157,15 +176,34 @@ public:
 	bool GroupsSelected() const;
 	bool GroupedItemsSelected() const;
 
+	void UpdateIcons();
+	void SetIconsVisible(bool visible);
+
 public slots:
+	inline void ReorderItems() { GetStm()->ReorderItems(); }
+	inline void RefreshItems() { GetStm()->SceneChanged(); }
+	void Remove(OBSSceneItem item, OBSScene scene);
 	void GroupSelectedItems();
 	void UngroupSelectedGroups();
 	void AddGroup();
-	void Edit(int idx);
+	bool Edit(int idx);
+	void NewGroupEdit(int idx);
 
 protected:
 	virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
 	virtual void dropEvent(QDropEvent *event) override;
+	virtual void paintEvent(QPaintEvent *event) override;
 
-	virtual void selectionChanged(const QItemSelection &selected, const QItemSelection &deselected) override;
+	virtual void
+	selectionChanged(const QItemSelection &selected,
+			 const QItemSelection &deselected) override;
+};
+
+class SourceTreeDelegate : public QStyledItemDelegate {
+	Q_OBJECT
+
+public:
+	SourceTreeDelegate(QObject *parent);
+	virtual QSize sizeHint(const QStyleOptionViewItem &option,
+			       const QModelIndex &index) const override;
 };

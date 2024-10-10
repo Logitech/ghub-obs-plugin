@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2013-2014 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -21,12 +21,20 @@
 extern "C" {
 #endif
 
-#define OBS_OUTPUT_VIDEO       (1<<0)
-#define OBS_OUTPUT_AUDIO       (1<<1)
-#define OBS_OUTPUT_AV          (OBS_OUTPUT_VIDEO | OBS_OUTPUT_AUDIO)
-#define OBS_OUTPUT_ENCODED     (1<<2)
-#define OBS_OUTPUT_SERVICE     (1<<3)
-#define OBS_OUTPUT_MULTI_TRACK (1<<4)
+#define OBS_OUTPUT_VIDEO (1 << 0)
+#define OBS_OUTPUT_AUDIO (1 << 1)
+#define OBS_OUTPUT_AV (OBS_OUTPUT_VIDEO | OBS_OUTPUT_AUDIO)
+#define OBS_OUTPUT_ENCODED (1 << 2)
+#define OBS_OUTPUT_SERVICE (1 << 3)
+#define OBS_OUTPUT_MULTI_TRACK (1 << 4)
+#define OBS_OUTPUT_CAN_PAUSE (1 << 5)
+#define OBS_OUTPUT_MULTI_TRACK_AUDIO OBS_OUTPUT_MULTI_TRACK
+#define OBS_OUTPUT_MULTI_TRACK_VIDEO (1 << 6)
+#define OBS_OUTPUT_MULTI_TRACK_AV \
+	(OBS_OUTPUT_MULTI_TRACK_AUDIO | OBS_OUTPUT_MULTI_TRACK_VIDEO)
+
+#define MAX_OUTPUT_AUDIO_ENCODERS 6
+#define MAX_OUTPUT_VIDEO_ENCODERS 6
 
 struct encoder_packet;
 
@@ -56,7 +64,7 @@ struct obs_output_info {
 
 	obs_properties_t *(*get_properties)(void *data);
 
-	void (*pause)(void *data);
+	void (*unused1)(void *data);
 
 	uint64_t (*get_total_bytes)(void *data);
 
@@ -71,10 +79,16 @@ struct obs_output_info {
 	/* only used with encoded outputs, separated with semicolon */
 	const char *encoded_video_codecs;
 	const char *encoded_audio_codecs;
+
+	/* raw audio callback for multi track outputs */
+	void (*raw_audio2)(void *data, size_t idx, struct audio_data *frames);
+
+	/* required if OBS_OUTPUT_SERVICE */
+	const char *protocols;
 };
 
 EXPORT void obs_register_output_s(const struct obs_output_info *info,
-		size_t size);
+				  size_t size);
 
 #define obs_register_output(info) \
 	obs_register_output_s(info, sizeof(struct obs_output_info))

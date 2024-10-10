@@ -8,14 +8,19 @@
 #include <condition_variable>
 #include <utility>
 #include <thread>
+#include <memory>
 #include <vector>
 #include <string>
 #include <mutex>
+#include <optional>
 
 class Ui_AutoConfigStartPage;
 class Ui_AutoConfigVideoPage;
 class Ui_AutoConfigStreamPage;
 class Ui_AutoConfigTestPage;
+
+class AutoConfigStreamPage;
+class Auth;
 
 class AutoConfig : public QWizard {
 	Q_OBJECT
@@ -28,13 +33,14 @@ class AutoConfig : public QWizard {
 	enum class Type {
 		Invalid,
 		Streaming,
-		Recording
+		Recording,
+		VirtualCam,
 	};
 
 	enum class Service {
 		Twitch,
-		Smashcast,
-		Other
+		YouTube,
+		Other,
 	};
 
 	enum class Encoder {
@@ -42,12 +48,13 @@ class AutoConfig : public QWizard {
 		NVENC,
 		QSV,
 		AMD,
-		Stream
+		Apple,
+		Stream,
 	};
 
 	enum class Quality {
 		Stream,
-		High
+		High,
 	};
 
 	enum class FPSType : int {
@@ -55,10 +62,17 @@ class AutoConfig : public QWizard {
 		PreferHighRes,
 		UseCurrent,
 		fps30,
-		fps60
+		fps60,
+	};
+
+	struct StreamServer {
+		std::string name;
+		std::string address;
 	};
 
 	static inline const char *GetEncoderId(Encoder enc);
+
+	AutoConfigStreamPage *streamPage = nullptr;
 
 	Service service = Service::Other;
 	Quality recordingQuality = Quality::Stream;
@@ -67,6 +81,11 @@ class AutoConfig : public QWizard {
 	Type type = Type::Streaming;
 	FPSType fpsType = FPSType::PreferHighFPS;
 	int idealBitrate = 2500;
+	struct {
+		std::optional<int> targetBitrate;
+		std::optional<int> bitrate;
+		bool testSuccessful = false;
+	} multitrackVideo;
 	int baseResolutionCX = 1920;
 	int baseResolutionCY = 1080;
 	int idealResolutionCX = 1280;
@@ -76,16 +95,19 @@ class AutoConfig : public QWizard {
 	std::string serviceName;
 	std::string serverName;
 	std::string server;
+	std::vector<StreamServer> serviceConfigServers;
 	std::string key;
 
 	bool hardwareEncodingAvailable = false;
 	bool nvencAvailable = false;
 	bool qsvAvailable = false;
 	bool vceAvailable = false;
+	bool appleAvailable = false;
 
 	int startingBitrate = 2500;
 	bool customServer = false;
 	bool bandwidthTest = false;
+	bool testMultitrackVideo = false;
 	bool testRegions = true;
 	bool twitchAuto = false;
 	bool regionUS = true;
@@ -113,7 +135,7 @@ public:
 		StartPage,
 		VideoPage,
 		StreamPage,
-		TestPage
+		TestPage,
 	};
 };
 
@@ -122,7 +144,7 @@ class AutoConfigStartPage : public QWizardPage {
 
 	friend class AutoConfig;
 
-	Ui_AutoConfigStartPage *ui;
+	std::unique_ptr<Ui_AutoConfigStartPage> ui;
 
 public:
 	AutoConfigStartPage(QWidget *parent = nullptr);
@@ -133,6 +155,7 @@ public:
 public slots:
 	void on_prioritizeStreaming_clicked();
 	void on_prioritizeRecording_clicked();
+	void PrioritizeVCam();
 };
 
 class AutoConfigVideoPage : public QWizardPage {
@@ -140,7 +163,7 @@ class AutoConfigVideoPage : public QWizardPage {
 
 	friend class AutoConfig;
 
-	Ui_AutoConfigVideoPage *ui;
+	std::unique_ptr<Ui_AutoConfigVideoPage> ui;
 
 public:
 	AutoConfigVideoPage(QWidget *parent = nullptr);
@@ -155,11 +178,19 @@ class AutoConfigStreamPage : public QWizardPage {
 
 	friend class AutoConfig;
 
-	Ui_AutoConfigStreamPage *ui;
+	enum class Section : int {
+		Connect,
+		StreamKey,
+	};
+
+	std::shared_ptr<Auth> auth;
+
+	std::unique_ptr<Ui_AutoConfigStreamPage> ui;
 	QString lastService;
 	bool ready = false;
 
 	void LoadServices(bool showAll);
+	inline bool IsCustomService() const;
 
 public:
 	AutoConfigStreamPage(QWidget *parent = nullptr);
@@ -169,12 +200,22 @@ public:
 	virtual int nextId() const override;
 	virtual bool validatePage() override;
 
+	void OnAuthConnected();
+	void OnOAuthStreamKeyConnected();
+
 public slots:
 	void on_show_clicked();
+	void on_connectAccount_clicked();
+	void on_disconnectAccount_clicked();
+	void on_useStreamKey_clicked();
+	void on_preferHardware_clicked();
 	void ServiceChanged();
 	void UpdateKeyLink();
+	void UpdateMoreInfoLink();
 	void UpdateServerList();
 	void UpdateCompleted();
+
+	void reset_service_ui_fields(std::string &service);
 };
 
 class AutoConfigTestPage : public QWizardPage {
@@ -184,7 +225,7 @@ class AutoConfigTestPage : public QWizardPage {
 
 	QPointer<QFormLayout> results;
 
-	Ui_AutoConfigTestPage *ui;
+	std::unique_ptr<Ui_AutoConfigTestPage> ui;
 	std::thread testThread;
 	std::condition_variable cv;
 	std::mutex m;
@@ -196,7 +237,7 @@ class AutoConfigTestPage : public QWizardPage {
 		BandwidthTest,
 		StreamEncoder,
 		RecordingEncoder,
-		Finished
+		Finished,
 	};
 
 	Stage stage = Stage::Starting;
@@ -224,7 +265,8 @@ class AutoConfigTestPage : public QWizardPage {
 		inline ServerInfo() {}
 
 		inline ServerInfo(const char *name_, const char *address_)
-			: name(name_), address(address_)
+			: name(name_),
+			  address(address_)
 		{
 		}
 	};

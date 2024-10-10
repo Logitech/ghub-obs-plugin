@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>ScriptsTool</class>
- <widget class="QWidget" name="ScriptsTool">
+ <widget class="QDialog" name="ScriptsTool">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -13,11 +13,17 @@
   <property name="windowTitle">
    <string>Scripts</string>
   </property>
+  <property name="sizeGripEnabled">
+   <bool>true</bool>
+  </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QTabWidget" name="tabWidget">
      <property name="currentIndex">
       <number>0</number>
+     </property>
+     <property name="tabBarAutoHide">
+      <bool>true</bool>
      </property>
      <widget class="QWidget" name="scriptsTab">
       <attribute name="title">
@@ -38,6 +44,12 @@
          </item>
          <item>
           <widget class="QListWidget" name="scripts">
+           <property name="contextMenuPolicy">
+            <enum>Qt::CustomContextMenu</enum>
+           </property>
+           <property name="spacing">
+            <number>1</number>
+           </property>
            <property name="sortingEnabled">
             <bool>true</bool>
            </property>
@@ -47,10 +59,16 @@
           <layout class="QHBoxLayout" name="horizontalLayout_2">
            <item>
             <widget class="QPushButton" name="addScripts">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="maximumSize">
               <size>
-               <width>22</width>
-               <height>22</height>
+               <width>16777215</width>
+               <height>16777215</height>
               </size>
              </property>
              <property name="toolTip">
@@ -68,14 +86,23 @@
              <property name="themeID" stdset="0">
               <string notr="true">addIconSmall</string>
              </property>
+             <property name="toolButton" stdset="0">
+              <bool>true</bool>
+             </property>
             </widget>
            </item>
            <item>
             <widget class="QPushButton" name="removeScripts">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="maximumSize">
               <size>
-               <width>22</width>
-               <height>22</height>
+               <width>16777215</width>
+               <height>16777215</height>
               </size>
              </property>
              <property name="toolTip">
@@ -93,14 +120,23 @@
              <property name="themeID" stdset="0">
               <string notr="true">removeIconSmall</string>
              </property>
+             <property name="toolButton" stdset="0">
+              <bool>true</bool>
+             </property>
             </widget>
            </item>
            <item>
             <widget class="QPushButton" name="reloadScripts">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
              <property name="maximumSize">
               <size>
-               <width>22</width>
-               <height>22</height>
+               <width>16777215</width>
+               <height>16777215</height>
               </size>
              </property>
              <property name="toolTip">
@@ -118,6 +154,9 @@
              <property name="themeID" stdset="0">
               <string notr="true">refreshIconSmall</string>
              </property>
+             <property name="toolButton" stdset="0">
+              <bool>true</bool>
+             </property>
             </widget>
            </item>
            <item>
@@ -132,6 +171,20 @@
               </size>
              </property>
             </spacer>
+           </item>
+           <item>
+            <widget class="QPushButton" name="defaults">
+             <property name="text">
+              <string>Defaults</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="editScript">
+             <property name="text">
+              <string>EditScript</string>
+             </property>
+            </widget>
            </item>
            <item>
             <widget class="QPushButton" name="scriptLog">
@@ -169,6 +222,9 @@
            </property>
            <property name="margin">
             <number>12</number>
+           </property>
+           <property name="openExternalLinks">
+            <bool>false</bool>
            </property>
           </widget>
          </item>
@@ -211,6 +267,13 @@
           </widget>
          </item>
         </layout>
+       </item>
+       <item>
+        <widget class="QLabel" name="pythonVersionLabel">
+         <property name="text">
+          <string/>
+         </property>
+        </widget>
        </item>
        <item>
         <spacer name="verticalSpacer">

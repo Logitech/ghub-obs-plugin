@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2013 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,18 +28,21 @@ struct audio_resampler;
 typedef struct audio_resampler audio_resampler_t;
 
 struct resample_info {
-	uint32_t            samples_per_sec;
-	enum audio_format   format;
+	uint32_t samples_per_sec;
+	enum audio_format format;
 	enum speaker_layout speakers;
 };
 
-EXPORT audio_resampler_t *audio_resampler_create(const struct resample_info *dst,
-		const struct resample_info *src);
+EXPORT audio_resampler_t *
+audio_resampler_create(const struct resample_info *dst,
+		       const struct resample_info *src);
 EXPORT void audio_resampler_destroy(audio_resampler_t *resampler);
 
 EXPORT bool audio_resampler_resample(audio_resampler_t *resampler,
-		 uint8_t *output[], uint32_t *out_frames, uint64_t *ts_offset,
-		 const uint8_t *const input[], uint32_t in_frames);
+				     uint8_t *output[], uint32_t *out_frames,
+				     uint64_t *ts_offset,
+				     const uint8_t *const input[],
+				     uint32_t in_frames);
 
 #ifdef __cplusplus
 }

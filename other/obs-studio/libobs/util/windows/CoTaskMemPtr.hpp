@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,25 +19,30 @@
 template<typename T> class CoTaskMemPtr {
 	T *ptr;
 
-	inline void Clear() {if (ptr) CoTaskMemFree(ptr);}
+	inline void Clear()
+	{
+		if (ptr)
+			CoTaskMemFree(ptr);
+	}
 
 public:
-	inline CoTaskMemPtr()        : ptr(NULL) {}
+	inline CoTaskMemPtr() : ptr(NULL) {}
 	inline CoTaskMemPtr(T *ptr_) : ptr(ptr_) {}
-	inline ~CoTaskMemPtr()                   {Clear();}
+	inline ~CoTaskMemPtr() { Clear(); }
 
-	inline operator T*() const               {return ptr;}
-	inline T *operator->() const             {return ptr;}
+	inline operator T *() const { return ptr; }
+	inline T *operator->() const { return ptr; }
 
-	inline const T *Get() const {return ptr;}
+	inline const T *Get() const { return ptr; }
 
-	inline CoTaskMemPtr& operator=(T* val)
+	inline CoTaskMemPtr &operator=(T *val)
 	{
 		Clear();
 		ptr = val;
+		return *this;
 	}
 
-	inline T** operator&()
+	inline T **operator&()
 	{
 		Clear();
 		ptr = NULL;

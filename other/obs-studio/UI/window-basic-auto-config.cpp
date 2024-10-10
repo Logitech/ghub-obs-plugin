@@ -1,18 +1,41 @@
-#include "window-basic-auto-config.hpp"
-#include "window-basic-main.hpp"
-#include "qt-wrappers.hpp"
-#include "obs-app.hpp"
-
 #include <QMessageBox>
 #include <QScreen>
 
 #include <obs.hpp>
+#include <qt-wrappers.hpp>
+
+#include <nlohmann/json.hpp>
+
+#include "window-basic-auto-config.hpp"
+#include "window-basic-main.hpp"
+#include "obs-app.hpp"
+#include "url-push-button.hpp"
+
+#include "goliveapi-postdata.hpp"
+#include "goliveapi-network.hpp"
+#include "multitrack-video-error.hpp"
 
 #include "ui_AutoConfigStartPage.h"
 #include "ui_AutoConfigVideoPage.h"
 #include "ui_AutoConfigStreamPage.h"
 
-#define wiz reinterpret_cast<AutoConfig*>(wizard())
+#ifdef BROWSER_AVAILABLE
+#include <browser-panel.hpp>
+#endif
+
+#include "auth-oauth.hpp"
+#include "ui-config.h"
+#ifdef YOUTUBE_ENABLED
+#include "youtube-api-wrappers.hpp"
+#endif
+
+struct QCef;
+struct QCefCookieManager;
+
+extern QCef *cef;
+extern QCefCookieManager *panel_cookies;
+
+#define wiz reinterpret_cast<AutoConfig *>(wizard())
 
 /* ------------------------------------------------------------------------- */
 
@@ -22,25 +45,23 @@ static OBSData OpenServiceSettings(std::string &type)
 {
 	char serviceJsonPath[512];
 	int ret = GetProfilePath(serviceJsonPath, sizeof(serviceJsonPath),
-			SERVICE_PATH);
+				 SERVICE_PATH);
 	if (ret <= 0)
 		return OBSData();
 
-	OBSData data = obs_data_create_from_json_file_safe(serviceJsonPath,
-			"bak");
-	obs_data_release(data);
+	OBSDataAutoRelease data =
+		obs_data_create_from_json_file_safe(serviceJsonPath, "bak");
 
 	obs_data_set_default_string(data, "type", "rtmp_common");
 	type = obs_data_get_string(data, "type");
 
-	OBSData settings = obs_data_get_obj(data, "settings");
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_data_get_obj(data, "settings");
 
-	return settings;
+	return settings.Get();
 }
 
 static void GetServiceInfo(std::string &type, std::string &service,
-		std::string &server, std::string &key)
+			   std::string &server, std::string &key)
 {
 	OBSData settings = OpenServiceSettings(type);
 
@@ -52,22 +73,33 @@ static void GetServiceInfo(std::string &type, std::string &service,
 /* ------------------------------------------------------------------------- */
 
 AutoConfigStartPage::AutoConfigStartPage(QWidget *parent)
-	: QWizardPage (parent),
-	  ui          (new Ui_AutoConfigStartPage)
+	: QWizardPage(parent),
+	  ui(new Ui_AutoConfigStartPage)
 {
 	ui->setupUi(this);
 	setTitle(QTStr("Basic.AutoConfig.StartPage"));
 	setSubTitle(QTStr("Basic.AutoConfig.StartPage.SubTitle"));
+
+	OBSBasic *main = OBSBasic::Get();
+	if (main->VCamEnabled()) {
+		QRadioButton *prioritizeVCam = new QRadioButton(
+			QTStr("Basic.AutoConfig.StartPage.PrioritizeVirtualCam"),
+			this);
+		QBoxLayout *box = reinterpret_cast<QBoxLayout *>(layout());
+		box->insertWidget(2, prioritizeVCam);
+
+		connect(prioritizeVCam, &QPushButton::clicked, this,
+			&AutoConfigStartPage::PrioritizeVCam);
+	}
 }
 
-AutoConfigStartPage::~AutoConfigStartPage()
-{
-	delete ui;
-}
+AutoConfigStartPage::~AutoConfigStartPage() {}
 
 int AutoConfigStartPage::nextId() const
 {
-	return AutoConfig::VideoPage;
+	return wiz->type == AutoConfig::Type::VirtualCam
+		       ? AutoConfig::TestPage
+		       : AutoConfig::VideoPage;
 }
 
 void AutoConfigStartPage::on_prioritizeStreaming_clicked()
@@ -80,18 +112,23 @@ void AutoConfigStartPage::on_prioritizeRecording_clicked()
 	wiz->type = AutoConfig::Type::Recording;
 }
 
+void AutoConfigStartPage::PrioritizeVCam()
+{
+	wiz->type = AutoConfig::Type::VirtualCam;
+}
+
 /* ------------------------------------------------------------------------- */
 
-#define RES_TEXT(x)             "Basic.AutoConfig.VideoPage." x
-#define RES_USE_CURRENT         RES_TEXT("BaseResolution.UseCurrent")
-#define RES_USE_DISPLAY         RES_TEXT("BaseResolution.Display")
-#define FPS_USE_CURRENT         RES_TEXT("FPS.UseCurrent")
-#define FPS_PREFER_HIGH_FPS     RES_TEXT("FPS.PreferHighFPS")
-#define FPS_PREFER_HIGH_RES     RES_TEXT("FPS.PreferHighRes")
+#define RES_TEXT(x) "Basic.AutoConfig.VideoPage." x
+#define RES_USE_CURRENT RES_TEXT("BaseResolution.UseCurrent")
+#define RES_USE_DISPLAY RES_TEXT("BaseResolution.Display")
+#define FPS_USE_CURRENT RES_TEXT("FPS.UseCurrent")
+#define FPS_PREFER_HIGH_FPS RES_TEXT("FPS.PreferHighFPS")
+#define FPS_PREFER_HIGH_RES RES_TEXT("FPS.PreferHighRes")
 
 AutoConfigVideoPage::AutoConfigVideoPage(QWidget *parent)
-	: QWizardPage (parent),
-	  ui          (new Ui_AutoConfigVideoPage)
+	: QWizardPage(parent),
+	  ui(new Ui_AutoConfigVideoPage)
 {
 	ui->setupUi(this);
 
@@ -104,16 +141,15 @@ AutoConfigVideoPage::AutoConfigVideoPage(QWidget *parent)
 	long double fpsVal =
 		(long double)ovi.fps_num / (long double)ovi.fps_den;
 
-	QString fpsStr = (ovi.fps_den > 1)
-		? QString::number(fpsVal, 'f', 2)
-		: QString::number(fpsVal, 'g', 2);
+	QString fpsStr = (ovi.fps_den > 1) ? QString::number(fpsVal, 'f', 2)
+					   : QString::number(fpsVal, 'g');
 
 	ui->fps->addItem(QTStr(FPS_PREFER_HIGH_FPS),
-			(int)AutoConfig::FPSType::PreferHighFPS);
+			 (int)AutoConfig::FPSType::PreferHighFPS);
 	ui->fps->addItem(QTStr(FPS_PREFER_HIGH_RES),
-			(int)AutoConfig::FPSType::PreferHighRes);
+			 (int)AutoConfig::FPSType::PreferHighRes);
 	ui->fps->addItem(QTStr(FPS_USE_CURRENT).arg(fpsStr),
-			(int)AutoConfig::FPSType::UseCurrent);
+			 (int)AutoConfig::FPSType::UseCurrent);
 	ui->fps->addItem(QStringLiteral("30"), (int)AutoConfig::FPSType::fps30);
 	ui->fps->addItem(QStringLiteral("60"), (int)AutoConfig::FPSType::fps60);
 	ui->fps->setCurrentIndex(0);
@@ -122,30 +158,39 @@ AutoConfigVideoPage::AutoConfigVideoPage(QWidget *parent)
 	QString cyStr = QString::number(ovi.base_height);
 
 	int encRes = int(ovi.base_width << 16) | int(ovi.base_height);
-	ui->canvasRes->addItem(QTStr(RES_USE_CURRENT).arg(cxStr, cyStr),
-			(int)encRes);
 
-	QList<QScreen*> screens = QGuiApplication::screens();
+	// Auto config only supports testing down to 240p, don't allow current
+	// resolution if it's lower than that.
+	if (ovi.base_height >= 240)
+		ui->canvasRes->addItem(QTStr(RES_USE_CURRENT).arg(cxStr, cyStr),
+				       (int)encRes);
+
+	QList<QScreen *> screens = QGuiApplication::screens();
 	for (int i = 0; i < screens.size(); i++) {
 		QScreen *screen = screens[i];
 		QSize as = screen->size();
+		int as_width = as.width();
+		int as_height = as.height();
 
-		encRes = int(as.width() << 16) | int(as.height());
+		// Calculate physical screen resolution based on the virtual screen resolution
+		// They might differ if scaling is enabled, e.g. for HiDPI screens
+		as_width = round(as_width * screen->devicePixelRatio());
+		as_height = round(as_height * screen->devicePixelRatio());
+
+		encRes = as_width << 16 | as_height;
 
 		QString str = QTStr(RES_USE_DISPLAY)
-			.arg(QString::number(i + 1),
-			     QString::number(as.width()),
-			     QString::number(as.height()));
+				      .arg(QString::number(i + 1),
+					   QString::number(as_width),
+					   QString::number(as_height));
 
 		ui->canvasRes->addItem(str, encRes);
 	}
 
-	auto addRes = [&] (int cx, int cy)
-	{
+	auto addRes = [&](int cx, int cy) {
 		encRes = (cx << 16) | cy;
-		QString str = QString("%1x%2").arg(
-				QString::number(cx),
-				QString::number(cy));
+		QString str = QString("%1x%2").arg(QString::number(cx),
+						   QString::number(cy));
 		ui->canvasRes->addItem(str, encRes);
 	};
 
@@ -155,16 +200,13 @@ AutoConfigVideoPage::AutoConfigVideoPage(QWidget *parent)
 	ui->canvasRes->setCurrentIndex(0);
 }
 
-AutoConfigVideoPage::~AutoConfigVideoPage()
-{
-	delete ui;
-}
+AutoConfigVideoPage::~AutoConfigVideoPage() {}
 
 int AutoConfigVideoPage::nextId() const
 {
 	return wiz->type == AutoConfig::Type::Recording
-		? AutoConfig::TestPage
-		: AutoConfig::StreamPage;
+		       ? AutoConfig::TestPage
+		       : AutoConfig::StreamPage;
 }
 
 bool AutoConfigVideoPage::validatePage()
@@ -210,55 +252,82 @@ bool AutoConfigVideoPage::validatePage()
 
 /* ------------------------------------------------------------------------- */
 
+enum class ListOpt : int {
+	ShowAll = 1,
+	Custom,
+};
+
 AutoConfigStreamPage::AutoConfigStreamPage(QWidget *parent)
-	: QWizardPage (parent),
-	  ui          (new Ui_AutoConfigStreamPage)
+	: QWizardPage(parent),
+	  ui(new Ui_AutoConfigStreamPage)
 {
 	ui->setupUi(this);
 	ui->bitrateLabel->setVisible(false);
 	ui->bitrate->setVisible(false);
+	ui->connectAccount2->setVisible(false);
+	ui->disconnectAccount->setVisible(false);
+	ui->useMultitrackVideo->setVisible(false);
 
-	ui->streamType->addItem(obs_service_get_display_name("rtmp_common"));
-	ui->streamType->addItem(obs_service_get_display_name("rtmp_custom"));
+	ui->connectedAccountLabel->setVisible(false);
+	ui->connectedAccountText->setVisible(false);
+
+	int vertSpacing = ui->topLayout->verticalSpacing();
+
+	QMargins m = ui->topLayout->contentsMargins();
+	m.setBottom(vertSpacing / 2);
+	ui->topLayout->setContentsMargins(m);
+
+	m = ui->loginPageLayout->contentsMargins();
+	m.setTop(vertSpacing / 2);
+	ui->loginPageLayout->setContentsMargins(m);
+
+	m = ui->streamkeyPageLayout->contentsMargins();
+	m.setTop(vertSpacing / 2);
+	ui->streamkeyPageLayout->setContentsMargins(m);
 
 	setTitle(QTStr("Basic.AutoConfig.StreamPage"));
 	setSubTitle(QTStr("Basic.AutoConfig.StreamPage.SubTitle"));
 
 	LoadServices(false);
 
-	connect(ui->streamType, SIGNAL(currentIndexChanged(int)),
-			this, SLOT(ServiceChanged()));
-	connect(ui->service, SIGNAL(currentIndexChanged(int)),
-			this, SLOT(ServiceChanged()));
-	connect(ui->customServer, SIGNAL(textChanged(const QString &)),
-			this, SLOT(ServiceChanged()));
-	connect(ui->doBandwidthTest, SIGNAL(toggled(bool)),
-			this, SLOT(ServiceChanged()));
+	connect(ui->service, &QComboBox::currentIndexChanged, this,
+		&AutoConfigStreamPage::ServiceChanged);
+	connect(ui->customServer, &QLineEdit::textChanged, this,
+		&AutoConfigStreamPage::ServiceChanged);
+	connect(ui->customServer, &QLineEdit::textChanged, this,
+		&AutoConfigStreamPage::UpdateKeyLink);
+	connect(ui->customServer, &QLineEdit::editingFinished, this,
+		&AutoConfigStreamPage::UpdateKeyLink);
+	connect(ui->doBandwidthTest, &QCheckBox::toggled, this,
+		&AutoConfigStreamPage::ServiceChanged);
 
-	connect(ui->service, SIGNAL(currentIndexChanged(int)),
-			this, SLOT(UpdateServerList()));
+	connect(ui->service, &QComboBox::currentIndexChanged, this,
+		&AutoConfigStreamPage::UpdateServerList);
 
-	connect(ui->streamType, SIGNAL(currentIndexChanged(int)),
-			this, SLOT(UpdateKeyLink()));
-	connect(ui->service, SIGNAL(currentIndexChanged(int)),
-			this, SLOT(UpdateKeyLink()));
+	connect(ui->service, &QComboBox::currentIndexChanged, this,
+		&AutoConfigStreamPage::UpdateKeyLink);
+	connect(ui->service, &QComboBox::currentIndexChanged, this,
+		&AutoConfigStreamPage::UpdateMoreInfoLink);
 
-	connect(ui->key, SIGNAL(textChanged(const QString &)),
-			this, SLOT(UpdateCompleted()));
-	connect(ui->regionUS, SIGNAL(toggled(bool)),
-			this, SLOT(UpdateCompleted()));
-	connect(ui->regionEU, SIGNAL(toggled(bool)),
-			this, SLOT(UpdateCompleted()));
-	connect(ui->regionAsia, SIGNAL(toggled(bool)),
-			this, SLOT(UpdateCompleted()));
-	connect(ui->regionOther, SIGNAL(toggled(bool)),
-			this, SLOT(UpdateCompleted()));
+	connect(ui->useStreamKeyAdv, &QPushButton::clicked, [&]() {
+		ui->streamKeyWidget->setVisible(true);
+		ui->streamKeyLabel->setVisible(true);
+		ui->useStreamKeyAdv->setVisible(false);
+	});
+
+	connect(ui->key, &QLineEdit::textChanged, this,
+		&AutoConfigStreamPage::UpdateCompleted);
+	connect(ui->regionUS, &QCheckBox::toggled, this,
+		&AutoConfigStreamPage::UpdateCompleted);
+	connect(ui->regionEU, &QCheckBox::toggled, this,
+		&AutoConfigStreamPage::UpdateCompleted);
+	connect(ui->regionAsia, &QCheckBox::toggled, this,
+		&AutoConfigStreamPage::UpdateCompleted);
+	connect(ui->regionOther, &QCheckBox::toggled, this,
+		&AutoConfigStreamPage::UpdateCompleted);
 }
 
-AutoConfigStreamPage::~AutoConfigStreamPage()
-{
-	delete ui;
-}
+AutoConfigStreamPage::~AutoConfigStreamPage() {}
 
 bool AutoConfigStreamPage::isComplete() const
 {
@@ -270,39 +339,53 @@ int AutoConfigStreamPage::nextId() const
 	return AutoConfig::TestPage;
 }
 
+inline bool AutoConfigStreamPage::IsCustomService() const
+{
+	return ui->service->currentData().toInt() == (int)ListOpt::Custom;
+}
+
 bool AutoConfigStreamPage::validatePage()
 {
-	OBSData service_settings = obs_data_create();
-	obs_data_release(service_settings);
+	OBSDataAutoRelease service_settings = obs_data_create();
 
-	wiz->customServer = ui->streamType->currentIndex() == 1;
+	wiz->customServer = IsCustomService();
 
-	const char *serverType = wiz->customServer
-		? "rtmp_custom"
-		: "rtmp_common";
+	const char *serverType = wiz->customServer ? "rtmp_custom"
+						   : "rtmp_common";
 
 	if (!wiz->customServer) {
 		obs_data_set_string(service_settings, "service",
-				QT_TO_UTF8(ui->service->currentText()));
+				    QT_TO_UTF8(ui->service->currentText()));
 	}
 
-	OBSService service = obs_service_create(serverType, "temp_service",
-			service_settings, nullptr);
-	obs_service_release(service);
+	OBSServiceAutoRelease service = obs_service_create(
+		serverType, "temp_service", service_settings, nullptr);
 
-	int bitrate = 10000;
+	int bitrate;
 	if (!ui->doBandwidthTest->isChecked()) {
 		bitrate = ui->bitrate->value();
 		wiz->idealBitrate = bitrate;
+	} else {
+		/* Default test target is 10 Mbps */
+		bitrate = 10000;
+#ifdef YOUTUBE_ENABLED
+		if (IsYouTubeService(wiz->serviceName)) {
+			/* Adjust upper bound to YouTube limits
+			 * for resolutions above 1080p */
+			if (wiz->baseResolutionCY > 1440)
+				bitrate = 51000;
+			else if (wiz->baseResolutionCY > 1080)
+				bitrate = 18000;
+		}
+#endif
 	}
 
-	OBSData settings = obs_data_create();
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_data_create();
 	obs_data_set_int(settings, "bitrate", bitrate);
 	obs_service_apply_encoder_settings(service, settings, nullptr);
 
 	if (wiz->customServer) {
-		QString server = ui->customServer->text();
+		QString server = ui->customServer->text().trimmed();
 		wiz->server = wiz->serverName = QT_TO_UTF8(server);
 	} else {
 		wiz->serverName = QT_TO_UTF8(ui->server->currentText());
@@ -324,20 +407,102 @@ bool AutoConfigStreamPage::validatePage()
 	if (!wiz->customServer) {
 		if (wiz->serviceName == "Twitch")
 			wiz->service = AutoConfig::Service::Twitch;
-		else if (wiz->serviceName == "Smashcast")
-			wiz->service = AutoConfig::Service::Smashcast;
+#ifdef YOUTUBE_ENABLED
+		else if (IsYouTubeService(wiz->serviceName))
+			wiz->service = AutoConfig::Service::YouTube;
+#endif
 		else
 			wiz->service = AutoConfig::Service::Other;
 	} else {
 		wiz->service = AutoConfig::Service::Other;
 	}
 
-	if (wiz->service != AutoConfig::Service::Twitch && wiz->bandwidthTest) {
+	if (wiz->service == AutoConfig::Service::Twitch) {
+		wiz->testMultitrackVideo = ui->useMultitrackVideo->isChecked();
+
+		auto postData =
+			constructGoLivePost(QString::fromStdString(wiz->key),
+					    std::nullopt, std::nullopt, false);
+
+		OBSDataAutoRelease service_settings =
+			obs_service_get_settings(service);
+		auto multitrack_video_name =
+			QTStr("Basic.Settings.Stream.MultitrackVideoLabel");
+		if (obs_data_has_user_value(service_settings,
+					    "multitrack_video_name")) {
+			multitrack_video_name = obs_data_get_string(
+				service_settings, "multitrack_video_name");
+		}
+
+		try {
+			auto config = DownloadGoLiveConfig(
+				this, MultitrackVideoAutoConfigURL(service),
+				postData, multitrack_video_name);
+
+			for (const auto &endpoint : config.ingest_endpoints) {
+				if (qstrnicmp("RTMP", endpoint.protocol.c_str(),
+					      4) != 0)
+					continue;
+
+				std::string address = endpoint.url_template;
+				auto pos = address.find("/{stream_key}");
+				if (pos != address.npos)
+					address.erase(pos);
+
+				wiz->serviceConfigServers.push_back(
+					{address, address});
+			}
+
+			int multitrackVideoBitrate = 0;
+			for (auto &encoder_config :
+			     config.encoder_configurations) {
+				auto it =
+					encoder_config.settings.find("bitrate");
+				if (it == encoder_config.settings.end())
+					continue;
+
+				if (!it->is_number_integer())
+					continue;
+
+				int bitrate = 0;
+				it->get_to(bitrate);
+				multitrackVideoBitrate += bitrate;
+			}
+
+			// grab a streamkey from the go live config if we can
+			for (auto &endpoint : config.ingest_endpoints) {
+				const char *p = endpoint.protocol.c_str();
+				const char *auth =
+					endpoint.authentication
+						? endpoint.authentication
+							  ->c_str()
+						: nullptr;
+				if (qstrnicmp("RTMP", p, 4) == 0 && auth &&
+				    *auth) {
+					wiz->key = auth;
+					break;
+				}
+			}
+
+			if (multitrackVideoBitrate > 0) {
+				wiz->startingBitrate = multitrackVideoBitrate;
+				wiz->idealBitrate = multitrackVideoBitrate;
+				wiz->multitrackVideo.targetBitrate =
+					multitrackVideoBitrate;
+				wiz->multitrackVideo.testSuccessful = true;
+			}
+		} catch (const MultitrackVideoError & /*err*/) {
+			// FIXME: do something sensible
+		}
+	}
+
+	if (wiz->service != AutoConfig::Service::Twitch &&
+	    wiz->service != AutoConfig::Service::YouTube &&
+	    wiz->bandwidthTest) {
 		QMessageBox::StandardButton button;
 #define WARNING_TEXT(x) QTStr("Basic.AutoConfig.StreamPage.StreamWarning." x)
-		button = OBSMessageBox::question(this,
-				WARNING_TEXT("Title"),
-				WARNING_TEXT("Text"));
+		button = OBSMessageBox::question(this, WARNING_TEXT("Title"),
+						 WARNING_TEXT("Text"));
 #undef WARNING_TEXT
 
 		if (button == QMessageBox::No)
@@ -358,45 +523,275 @@ void AutoConfigStreamPage::on_show_clicked()
 	}
 }
 
+void AutoConfigStreamPage::OnOAuthStreamKeyConnected()
+{
+	OAuthStreamKey *a = reinterpret_cast<OAuthStreamKey *>(auth.get());
+
+	if (a) {
+		bool validKey = !a->key().empty();
+
+		if (validKey)
+			ui->key->setText(QT_UTF8(a->key().c_str()));
+
+		ui->streamKeyWidget->setVisible(false);
+		ui->streamKeyLabel->setVisible(false);
+		ui->connectAccount2->setVisible(false);
+		ui->disconnectAccount->setVisible(true);
+		ui->useStreamKeyAdv->setVisible(false);
+
+		ui->connectedAccountLabel->setVisible(false);
+		ui->connectedAccountText->setVisible(false);
+
+#ifdef YOUTUBE_ENABLED
+		if (IsYouTubeService(a->service())) {
+			ui->key->clear();
+
+			ui->connectedAccountLabel->setVisible(true);
+			ui->connectedAccountText->setVisible(true);
+
+			ui->connectedAccountText->setText(
+				QTStr("Auth.LoadingChannel.Title"));
+
+			YoutubeApiWrappers *ytAuth =
+				reinterpret_cast<YoutubeApiWrappers *>(a);
+			ChannelDescription cd;
+			if (ytAuth->GetChannelDescription(cd)) {
+				ui->connectedAccountText->setText(cd.title);
+
+				/* Create throwaway stream key for bandwidth test */
+				if (ui->doBandwidthTest->isChecked()) {
+					StreamDescription stream = {
+						"", "",
+						"OBS Studio Test Stream"};
+					if (ytAuth->InsertStream(stream)) {
+						ui->key->setText(stream.name);
+					}
+				}
+			}
+		}
+#endif
+	}
+
+	ui->stackedWidget->setCurrentIndex((int)Section::StreamKey);
+	UpdateCompleted();
+}
+
+void AutoConfigStreamPage::OnAuthConnected()
+{
+	std::string service = QT_TO_UTF8(ui->service->currentText());
+	Auth::Type type = Auth::AuthType(service);
+
+	if (type == Auth::Type::OAuth_StreamKey ||
+	    type == Auth::Type::OAuth_LinkedAccount) {
+		OnOAuthStreamKeyConnected();
+	}
+}
+
+void AutoConfigStreamPage::on_connectAccount_clicked()
+{
+	std::string service = QT_TO_UTF8(ui->service->currentText());
+
+	OAuth::DeleteCookies(service);
+
+	auth = OAuthStreamKey::Login(this, service);
+	if (!!auth) {
+		OnAuthConnected();
+
+		ui->useStreamKeyAdv->setVisible(false);
+	}
+}
+
+#define DISCONNECT_COMFIRM_TITLE \
+	"Basic.AutoConfig.StreamPage.DisconnectAccount.Confirm.Title"
+#define DISCONNECT_COMFIRM_TEXT \
+	"Basic.AutoConfig.StreamPage.DisconnectAccount.Confirm.Text"
+
+void AutoConfigStreamPage::on_disconnectAccount_clicked()
+{
+	QMessageBox::StandardButton button;
+
+	button = OBSMessageBox::question(this, QTStr(DISCONNECT_COMFIRM_TITLE),
+					 QTStr(DISCONNECT_COMFIRM_TEXT));
+
+	if (button == QMessageBox::No) {
+		return;
+	}
+
+	OBSBasic *main = OBSBasic::Get();
+
+	main->auth.reset();
+	auth.reset();
+
+	std::string service = QT_TO_UTF8(ui->service->currentText());
+
+#ifdef BROWSER_AVAILABLE
+	OAuth::DeleteCookies(service);
+#endif
+
+	reset_service_ui_fields(service);
+
+	ui->streamKeyWidget->setVisible(true);
+	ui->streamKeyLabel->setVisible(true);
+	ui->key->setText("");
+
+	ui->connectedAccountLabel->setVisible(false);
+	ui->connectedAccountText->setVisible(false);
+
+	/* Restore key link when disconnecting account */
+	UpdateKeyLink();
+}
+
+void AutoConfigStreamPage::on_useStreamKey_clicked()
+{
+	ui->stackedWidget->setCurrentIndex((int)Section::StreamKey);
+	UpdateCompleted();
+}
+
+void AutoConfigStreamPage::on_preferHardware_clicked()
+{
+	auto *main = OBSBasic::Get();
+	bool multitrackVideoEnabled =
+		config_has_user_value(main->Config(), "Stream1",
+				      "EnableMultitrackVideo")
+			? config_get_bool(main->Config(), "Stream1",
+					  "EnableMultitrackVideo")
+			: true;
+
+	ui->useMultitrackVideo->setEnabled(ui->preferHardware->isChecked());
+	ui->multitrackVideoInfo->setEnabled(ui->preferHardware->isChecked());
+	ui->useMultitrackVideo->setChecked(ui->preferHardware->isChecked() &&
+					   multitrackVideoEnabled);
+}
+
+static inline bool is_auth_service(const std::string &service)
+{
+	return Auth::AuthType(service) != Auth::Type::None;
+}
+
+static inline bool is_external_oauth(const std::string &service)
+{
+	return Auth::External(service);
+}
+
+void AutoConfigStreamPage::reset_service_ui_fields(std::string &service)
+{
+#ifdef YOUTUBE_ENABLED
+	// when account is already connected:
+	OAuthStreamKey *a = reinterpret_cast<OAuthStreamKey *>(auth.get());
+	if (a && service == a->service() && IsYouTubeService(a->service())) {
+		ui->connectedAccountLabel->setVisible(true);
+		ui->connectedAccountText->setVisible(true);
+		ui->connectAccount2->setVisible(false);
+		ui->disconnectAccount->setVisible(true);
+		return;
+	}
+#endif
+
+	bool external_oauth = is_external_oauth(service);
+	if (external_oauth) {
+		ui->streamKeyWidget->setVisible(false);
+		ui->streamKeyLabel->setVisible(false);
+		ui->connectAccount2->setVisible(true);
+		ui->useStreamKeyAdv->setVisible(true);
+
+		ui->stackedWidget->setCurrentIndex((int)Section::StreamKey);
+
+	} else if (cef) {
+		QString key = ui->key->text();
+		bool can_auth = is_auth_service(service);
+		int page = can_auth && key.isEmpty() ? (int)Section::Connect
+						     : (int)Section::StreamKey;
+
+		ui->stackedWidget->setCurrentIndex(page);
+		ui->streamKeyWidget->setVisible(true);
+		ui->streamKeyLabel->setVisible(true);
+		ui->connectAccount2->setVisible(can_auth);
+		ui->useStreamKeyAdv->setVisible(false);
+	} else {
+		ui->connectAccount2->setVisible(false);
+		ui->useStreamKeyAdv->setVisible(false);
+	}
+
+	ui->connectedAccountLabel->setVisible(false);
+	ui->connectedAccountText->setVisible(false);
+	ui->disconnectAccount->setVisible(false);
+}
+
 void AutoConfigStreamPage::ServiceChanged()
 {
-	bool showMore = ui->service->currentData().toBool();
+	bool showMore = ui->service->currentData().toInt() ==
+			(int)ListOpt::ShowAll;
 	if (showMore)
 		return;
 
 	std::string service = QT_TO_UTF8(ui->service->currentText());
-	bool regionBased = service == "Twitch" ||
-	                   service == "Smashcast";
+	bool regionBased = service == "Twitch";
 	bool testBandwidth = ui->doBandwidthTest->isChecked();
-	bool custom = ui->streamType->currentIndex() == 1;
+	bool custom = IsCustomService();
+
+	bool ertmp_multitrack_video_available = service == "Twitch";
+
+	bool custom_disclaimer = false;
+	auto multitrack_video_name =
+		QTStr("Basic.Settings.Stream.MultitrackVideoLabel");
+	if (!custom) {
+		OBSDataAutoRelease service_settings = obs_data_create();
+		obs_data_set_string(service_settings, "service",
+				    service.c_str());
+		OBSServiceAutoRelease obs_service =
+			obs_service_create("rtmp_common", "temp service",
+					   service_settings, nullptr);
+
+		if (obs_data_has_user_value(service_settings,
+					    "multitrack_video_name")) {
+			multitrack_video_name = obs_data_get_string(
+				service_settings, "multitrack_video_name");
+		}
+
+		if (obs_data_has_user_value(service_settings,
+					    "multitrack_video_disclaimer")) {
+			ui->multitrackVideoInfo->setText(obs_data_get_string(
+				service_settings,
+				"multitrack_video_disclaimer"));
+			custom_disclaimer = true;
+		}
+	}
+
+	if (!custom_disclaimer) {
+		ui->multitrackVideoInfo->setText(
+			QTStr("MultitrackVideo.Info")
+				.arg(multitrack_video_name, service.c_str()));
+	}
+
+	ui->multitrackVideoInfo->setVisible(ertmp_multitrack_video_available);
+	ui->useMultitrackVideo->setVisible(ertmp_multitrack_video_available);
+	ui->useMultitrackVideo->setText(
+		QTStr("Basic.AutoConfig.StreamPage.UseMultitrackVideo")
+			.arg(multitrack_video_name));
+	ui->multitrackVideoInfo->setEnabled(wiz->hardwareEncodingAvailable);
+	ui->useMultitrackVideo->setEnabled(wiz->hardwareEncodingAvailable);
+
+	reset_service_ui_fields(service);
 
 	/* Test three closest servers if "Auto" is available for Twitch */
 	if (service == "Twitch" && wiz->twitchAuto)
 		regionBased = false;
 
-	ui->service->setVisible(!custom);
-	ui->serviceLabel->setVisible(!custom);
-
-	ui->formLayout->removeWidget(ui->serviceLabel);
-	ui->formLayout->removeWidget(ui->service);
-
-	ui->formLayout->removeWidget(ui->serverLabel);
-	ui->formLayout->removeWidget(ui->serverStackedWidget);
+	ui->streamkeyPageLayout->removeWidget(ui->serverLabel);
+	ui->streamkeyPageLayout->removeWidget(ui->serverStackedWidget);
 
 	if (custom) {
-		ui->formLayout->insertRow(1, ui->serverLabel,
-				ui->serverStackedWidget);
+		ui->streamkeyPageLayout->insertRow(1, ui->serverLabel,
+						   ui->serverStackedWidget);
 
 		ui->region->setVisible(false);
 		ui->serverStackedWidget->setCurrentIndex(1);
 		ui->serverStackedWidget->setVisible(true);
 		ui->serverLabel->setVisible(true);
 	} else {
-		ui->formLayout->insertRow(1, ui->serviceLabel, ui->service);
-
 		if (!testBandwidth)
-			ui->formLayout->insertRow(2, ui->serverLabel,
-					ui->serverStackedWidget);
+			ui->streamkeyPageLayout->insertRow(
+				2, ui->serverLabel, ui->serverStackedWidget);
 
 		ui->region->setVisible(regionBased && testBandwidth);
 		ui->serverStackedWidget->setCurrentIndex(0);
@@ -409,51 +804,115 @@ void AutoConfigStreamPage::ServiceChanged()
 	ui->bitrateLabel->setHidden(testBandwidth);
 	ui->bitrate->setHidden(testBandwidth);
 
+	OBSBasic *main = OBSBasic::Get();
+
+	if (main->auth) {
+		auto system_auth_service = main->auth->service();
+		bool service_check = service.find(system_auth_service) !=
+				     std::string::npos;
+#ifdef YOUTUBE_ENABLED
+		service_check =
+			service_check ? service_check
+				      : IsYouTubeService(system_auth_service) &&
+						IsYouTubeService(service);
+#endif
+		if (service_check) {
+			auth.reset();
+			auth = main->auth;
+			OnAuthConnected();
+		}
+	}
+
 	UpdateCompleted();
+}
+
+void AutoConfigStreamPage::UpdateMoreInfoLink()
+{
+	if (IsCustomService()) {
+		ui->moreInfoButton->hide();
+		return;
+	}
+
+	QString serviceName = ui->service->currentText();
+	obs_properties_t *props = obs_get_service_properties("rtmp_common");
+	obs_property_t *services = obs_properties_get(props, "service");
+
+	OBSDataAutoRelease settings = obs_data_create();
+
+	obs_data_set_string(settings, "service", QT_TO_UTF8(serviceName));
+	obs_property_modified(services, settings);
+
+	const char *more_info_link =
+		obs_data_get_string(settings, "more_info_link");
+
+	if (!more_info_link || (*more_info_link == '\0')) {
+		ui->moreInfoButton->hide();
+	} else {
+		ui->moreInfoButton->setTargetUrl(QUrl(more_info_link));
+		ui->moreInfoButton->show();
+	}
+	obs_properties_destroy(props);
 }
 
 void AutoConfigStreamPage::UpdateKeyLink()
 {
-	bool custom = ui->streamType->currentIndex() == 1;
 	QString serviceName = ui->service->currentText();
-	bool isYoutube = false;
+	QString customServer = ui->customServer->text().trimmed();
+	QString streamKeyLink;
 
-	if (custom)
-		serviceName = "";
+	obs_properties_t *props = obs_get_service_properties("rtmp_common");
+	obs_property_t *services = obs_properties_get(props, "service");
 
-	QString text = QTStr("Basic.AutoConfig.StreamPage.StreamKey");
-	if (serviceName == "Twitch") {
-		text += " <a href=\"https://";
-		text += "www.twitch.tv/broadcast/dashboard/streamkey";
-		text += "\">";
-		text += QTStr("Basic.AutoConfig.StreamPage.StreamKey.LinkToSite");
-		text += "</a>";
-	} else if (serviceName == "YouTube / YouTube Gaming") {
-		text += " <a href=\"https://";
-		text += "www.youtube.com/live_dashboard";
-		text += "\">";
-		text += QTStr("Basic.AutoConfig.StreamPage.StreamKey.LinkToSite");
-		text += "</a>";
+	OBSDataAutoRelease settings = obs_data_create();
 
-		isYoutube = true;
+	obs_data_set_string(settings, "service", QT_TO_UTF8(serviceName));
+	obs_property_modified(services, settings);
+
+	streamKeyLink = obs_data_get_string(settings, "stream_key_link");
+
+	if (customServer.contains("fbcdn.net") && IsCustomService()) {
+		streamKeyLink =
+			"https://www.facebook.com/live/producer?ref=OBS";
 	}
 
-	if (isYoutube) {
-		ui->doBandwidthTest->setChecked(false);
-		ui->doBandwidthTest->setEnabled(false);
+	if (serviceName == "Dacast") {
+		ui->streamKeyLabel->setText(
+			QTStr("Basic.AutoConfig.StreamPage.EncoderKey"));
+		ui->streamKeyLabel->setToolTip("");
+	} else if (!IsCustomService()) {
+		ui->streamKeyLabel->setText(
+			QTStr("Basic.AutoConfig.StreamPage.StreamKey"));
+		ui->streamKeyLabel->setToolTip("");
 	} else {
-		ui->doBandwidthTest->setEnabled(true);
+		/* add tooltips for stream key */
+		QString file = !App()->IsThemeDark()
+				       ? ":/res/images/help.svg"
+				       : ":/res/images/help_light.svg";
+		QString lStr = "<html>%1 <img src='%2' style=' \
+				vertical-align: bottom;  \
+				' /></html>";
+
+		ui->streamKeyLabel->setText(lStr.arg(
+			QTStr("Basic.AutoConfig.StreamPage.StreamKey"), file));
+		ui->streamKeyLabel->setToolTip(
+			QTStr("Basic.AutoConfig.StreamPage.StreamKey.ToolTip"));
 	}
 
-	ui->streamKeyLabel->setText(text);
+	if (QString(streamKeyLink).isNull() ||
+	    QString(streamKeyLink).isEmpty()) {
+		ui->streamKeyButton->hide();
+	} else {
+		ui->streamKeyButton->setTargetUrl(QUrl(streamKeyLink));
+		ui->streamKeyButton->show();
+	}
+	obs_properties_destroy(props);
 }
 
 void AutoConfigStreamPage::LoadServices(bool showAll)
 {
 	obs_properties_t *props = obs_get_service_properties("rtmp_common");
 
-	OBSData settings = obs_data_create();
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_data_create();
 
 	obs_data_set_bool(settings, "show_all", showAll);
 
@@ -473,21 +932,25 @@ void AutoConfigStreamPage::LoadServices(bool showAll)
 	}
 
 	if (showAll)
-		names.sort();
+		names.sort(Qt::CaseInsensitive);
 
 	for (QString &name : names)
 		ui->service->addItem(name);
+
+	if (!showAll) {
+		ui->service->addItem(
+			QTStr("Basic.AutoConfig.StreamPage.Service.ShowAll"),
+			QVariant((int)ListOpt::ShowAll));
+	}
+
+	ui->service->insertItem(
+		0, QTStr("Basic.AutoConfig.StreamPage.Service.Custom"),
+		QVariant((int)ListOpt::Custom));
 
 	if (!lastService.isEmpty()) {
 		int idx = ui->service->findText(lastService);
 		if (idx != -1)
 			ui->service->setCurrentIndex(idx);
-	}
-
-	if (!showAll) {
-		ui->service->addItem(
-			QTStr("Basic.AutoConfig.StreamPage.Service.ShowAll"),
-			QVariant(true));
 	}
 
 	obs_properties_destroy(props);
@@ -498,7 +961,8 @@ void AutoConfigStreamPage::LoadServices(bool showAll)
 void AutoConfigStreamPage::UpdateServerList()
 {
 	QString serviceName = ui->service->currentText();
-	bool showMore = ui->service->currentData().toBool();
+	bool showMore = ui->service->currentData().toInt() ==
+			(int)ListOpt::ShowAll;
 
 	if (showMore) {
 		LoadServices(true);
@@ -511,8 +975,7 @@ void AutoConfigStreamPage::UpdateServerList()
 	obs_properties_t *props = obs_get_service_properties("rtmp_common");
 	obs_property_t *services = obs_properties_get(props, "service");
 
-	OBSData settings = obs_data_create();
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_data_create();
 
 	obs_data_set_string(settings, "service", QT_TO_UTF8(serviceName));
 	obs_property_modified(services, settings);
@@ -533,10 +996,11 @@ void AutoConfigStreamPage::UpdateServerList()
 
 void AutoConfigStreamPage::UpdateCompleted()
 {
-	if (ui->key->text().isEmpty()) {
+	const bool custom = IsCustomService();
+	if (ui->stackedWidget->currentIndex() == (int)Section::Connect ||
+	    (ui->key->text().isEmpty() && !auth && !custom)) {
 		ready = false;
 	} else {
-		bool custom = ui->streamType->currentIndex() == 1;
 		if (custom) {
 			ready = !ui->customServer->text().isEmpty();
 		} else {
@@ -552,9 +1016,10 @@ void AutoConfigStreamPage::UpdateCompleted()
 
 /* ------------------------------------------------------------------------- */
 
-AutoConfig::AutoConfig(QWidget *parent)
-	: QWizard(parent)
+AutoConfig::AutoConfig(QWidget *parent) : QWizard(parent)
 {
+	EnableThreadedMessageBoxes(true);
+
 	calldata_t cd = {0};
 	calldata_set_int(&cd, "seconds", 5);
 
@@ -562,23 +1027,24 @@ AutoConfig::AutoConfig(QWidget *parent)
 	proc_handler_call(ph, "twitch_ingests_refresh", &cd);
 	calldata_free(&cd);
 
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(parent);
+	OBSBasic *main = reinterpret_cast<OBSBasic *>(parent);
 	main->EnableOutputs(false);
 
 	installEventFilter(CreateShortcutFilter());
 
 	std::string serviceType;
 	GetServiceInfo(serviceType, serviceName, server, key);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	setWizardStyle(QWizard::ModernStyle);
 #endif
-	AutoConfigStreamPage *streamPage = new AutoConfigStreamPage();
+	streamPage = new AutoConfigStreamPage();
 
 	setPage(StartPage, new AutoConfigStartPage());
 	setPage(VideoPage, new AutoConfigVideoPage());
 	setPage(StreamPage, streamPage);
 	setPage(TestPage, new AutoConfigTestPage());
-	setWindowTitle(QTStr("Basic.AutoConfig.Beta"));
+	setWindowTitle(QTStr("Basic.AutoConfig"));
+	setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
 	obs_video_info ovi;
 	obs_get_video_info(&ovi);
@@ -589,8 +1055,7 @@ AutoConfig::AutoConfig(QWidget *parent)
 	/* ----------------------------------------- */
 	/* check to see if Twitch's "auto" available */
 
-	OBSData twitchSettings = obs_data_create();
-	obs_data_release(twitchSettings);
+	OBSDataAutoRelease twitchSettings = obs_data_create();
 
 	obs_data_set_string(twitchSettings, "service", "Twitch");
 
@@ -636,6 +1101,8 @@ AutoConfig::AutoConfig(QWidget *parent)
 
 	streamPage->UpdateServerList();
 	streamPage->UpdateKeyLink();
+	streamPage->UpdateMoreInfoLink();
+	streamPage->lastService.clear();
 
 	if (!customServer) {
 		QComboBox *serverList = streamPage->ui->server;
@@ -646,27 +1113,44 @@ AutoConfig::AutoConfig(QWidget *parent)
 		serverList->setCurrentIndex(idx);
 	} else {
 		streamPage->ui->customServer->setText(server.c_str());
-		streamPage->ui->streamType->setCurrentIndex(1);
+		int idx = streamPage->ui->service->findData(
+			QVariant((int)ListOpt::Custom));
+		streamPage->ui->service->setCurrentIndex(idx);
 	}
 
 	if (!key.empty())
 		streamPage->ui->key->setText(key.c_str());
 
-	int bitrate = config_get_int(main->Config(), "SimpleOutput", "VBitrate");
+	TestHardwareEncoding();
+
+	int bitrate =
+		config_get_int(main->Config(), "SimpleOutput", "VBitrate");
+	bool multitrackVideoEnabled =
+		config_has_user_value(main->Config(), "Stream1",
+				      "EnableMultitrackVideo")
+			? config_get_bool(main->Config(), "Stream1",
+					  "EnableMultitrackVideo")
+			: true;
 	streamPage->ui->bitrate->setValue(bitrate);
+	streamPage->ui->useMultitrackVideo->setChecked(
+		hardwareEncodingAvailable && multitrackVideoEnabled);
 	streamPage->ServiceChanged();
 
-	streamPage->ui->preferHardware->setChecked(os_get_physical_cores() <= 4);
-
-	TestHardwareEncoding();
 	if (!hardwareEncodingAvailable) {
 		delete streamPage->ui->preferHardware;
 		streamPage->ui->preferHardware = nullptr;
+	} else {
+		/* Newer generations of NVENC have a high enough quality to
+		 * bitrate ratio that if NVENC is available, it makes sense to
+		 * just always prefer hardware encoding by default */
+		bool preferHardware = nvencAvailable || appleAvailable ||
+				      os_get_physical_cores() <= 4;
+		streamPage->ui->preferHardware->setChecked(preferHardware);
 	}
 
-	setOptions(0);
+	setOptions(QWizard::WizardOptions());
 	setButtonText(QWizard::FinishButton,
-			QTStr("Basic.AutoConfig.ApplySettings"));
+		      QTStr("Basic.AutoConfig.ApplySettings"));
 	setButtonText(QWizard::BackButton, QTStr("Back"));
 	setButtonText(QWizard::NextButton, QTStr("Next"));
 	setButtonText(QWizard::CancelButton, QTStr("Cancel"));
@@ -674,8 +1158,9 @@ AutoConfig::AutoConfig(QWidget *parent)
 
 AutoConfig::~AutoConfig()
 {
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
 	main->EnableOutputs(true);
+	EnableThreadedMessageBoxes(false);
 }
 
 void AutoConfig::TestHardwareEncoding()
@@ -687,8 +1172,20 @@ void AutoConfig::TestHardwareEncoding()
 			hardwareEncodingAvailable = nvencAvailable = true;
 		else if (strcmp(id, "obs_qsv11") == 0)
 			hardwareEncodingAvailable = qsvAvailable = true;
-		else if (strcmp(id, "amd_amf_h264") == 0)
+		else if (strcmp(id, "h264_texture_amf") == 0)
 			hardwareEncodingAvailable = vceAvailable = true;
+#ifdef __APPLE__
+		else if (strcmp(id,
+				"com.apple.videotoolbox.videoencoder.ave.avc") ==
+				 0
+#ifndef __aarch64__
+			 && os_get_emulation_status() == true
+#endif
+		)
+			if (__builtin_available(macOS 13.0, *))
+				hardwareEncodingAvailable = appleAvailable =
+					true;
+#endif
 	}
 }
 
@@ -709,21 +1206,6 @@ bool AutoConfig::CanTestServer(const char *server)
 		} else if (regionOther) {
 			return true;
 		}
-	} else if (service == Service::Smashcast) {
-		if (strcmp(server, "Default") == 0) {
-			return true;
-		} else if (astrcmp_n(server, "US-West:", 8) == 0 ||
-		           astrcmp_n(server, "US-East:", 8) == 0) {
-			return regionUS;
-		} else if (astrcmp_n(server, "EU-", 3) == 0) {
-			return regionEU;
-		} else if (astrcmp_n(server, "South Korea:", 12) == 0 ||
-		           astrcmp_n(server, "Asia:", 5) == 0 ||
-		           astrcmp_n(server, "China:", 6) == 0) {
-			return regionAsia;
-		} else if (regionOther) {
-			return true;
-		}
 	} else {
 		return true;
 	}
@@ -739,6 +1221,13 @@ void AutoConfig::done(int result)
 		if (type == Type::Streaming)
 			SaveStreamSettings();
 		SaveSettings();
+
+#ifdef YOUTUBE_ENABLED
+		if (YouTubeAppDock::IsYTServiceSelected()) {
+			OBSBasic *main = OBSBasic::Get();
+			main->NewYouTubeAppDock();
+		}
+#endif
 	}
 }
 
@@ -751,6 +1240,8 @@ inline const char *AutoConfig::GetEncoderId(Encoder enc)
 		return SIMPLE_ENCODER_QSV;
 	case Encoder::AMD:
 		return SIMPLE_ENCODER_AMD;
+	case Encoder::Apple:
+		return SIMPLE_ENCODER_APPLE_H264;
 	default:
 		return SIMPLE_ENCODER_X264;
 	}
@@ -758,61 +1249,95 @@ inline const char *AutoConfig::GetEncoderId(Encoder enc)
 
 void AutoConfig::SaveStreamSettings()
 {
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
 
 	/* ---------------------------------- */
 	/* save service                       */
 
-	const char *service_id = customServer
-		? "rtmp_custom"
-		: "rtmp_common";
+	const char *service_id = customServer ? "rtmp_custom" : "rtmp_common";
 
 	obs_service_t *oldService = main->GetService();
-	OBSData hotkeyData = obs_hotkeys_save_service(oldService);
-	obs_data_release(hotkeyData);
+	OBSDataAutoRelease hotkeyData = obs_hotkeys_save_service(oldService);
 
-	OBSData settings = obs_data_create();
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_data_create();
 
 	if (!customServer)
 		obs_data_set_string(settings, "service", serviceName.c_str());
 	obs_data_set_string(settings, "server", server.c_str());
+#ifdef YOUTUBE_ENABLED
+	if (!streamPage->auth || !IsYouTubeService(serviceName))
+		obs_data_set_string(settings, "key", key.c_str());
+#else
 	obs_data_set_string(settings, "key", key.c_str());
+#endif
 
-	OBSService newService = obs_service_create(service_id,
-			"default_service", settings, hotkeyData);
-	obs_service_release(newService);
+	OBSServiceAutoRelease newService = obs_service_create(
+		service_id, "default_service", settings, hotkeyData);
 
 	if (!newService)
 		return;
 
 	main->SetService(newService);
 	main->SaveService();
+	main->auth = streamPage->auth;
+	if (!!main->auth) {
+		main->auth->LoadUI();
+		main->SetBroadcastFlowEnabled(main->auth->broadcastFlow());
+	} else {
+		main->SetBroadcastFlowEnabled(false);
+	}
 
 	/* ---------------------------------- */
 	/* save stream settings               */
 
 	config_set_int(main->Config(), "SimpleOutput", "VBitrate",
-			idealBitrate);
+		       idealBitrate);
 	config_set_string(main->Config(), "SimpleOutput", "StreamEncoder",
-			GetEncoderId(streamingEncoder));
+			  GetEncoderId(streamingEncoder));
 	config_remove_value(main->Config(), "SimpleOutput", "UseAdvanced");
+
+	config_set_bool(main->Config(), "Stream1", "EnableMultitrackVideo",
+			multitrackVideo.testSuccessful);
+
+	if (multitrackVideo.targetBitrate.has_value())
+		config_set_int(main->Config(), "Stream1",
+			       "MultitrackVideoTargetBitrate",
+			       *multitrackVideo.targetBitrate);
+	else
+		config_remove_value(main->Config(), "Stream1",
+				    "MultitrackVideoTargetBitrate");
+
+	if (multitrackVideo.bitrate.has_value() &&
+	    multitrackVideo.targetBitrate.has_value() &&
+	    (static_cast<double>(*multitrackVideo.bitrate) /
+	     *multitrackVideo.targetBitrate) >= 0.90) {
+		config_set_bool(main->Config(), "Stream1",
+				"MultitrackVideoMaximumAggregateBitrateAuto",
+				true);
+	} else if (multitrackVideo.bitrate.has_value()) {
+		config_set_bool(main->Config(), "Stream1",
+				"MultitrackVideoMaximumAggregateBitrateAuto",
+				false);
+		config_set_int(main->Config(), "Stream1",
+			       "MultitrackVideoMaximumAggregateBitrate",
+			       *multitrackVideo.bitrate);
+	}
 }
 
 void AutoConfig::SaveSettings()
 {
-	OBSBasic *main = reinterpret_cast<OBSBasic*>(App()->GetMainWindow());
+	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
 
 	if (recordingEncoder != Encoder::Stream)
 		config_set_string(main->Config(), "SimpleOutput", "RecEncoder",
-				GetEncoderId(recordingEncoder));
+				  GetEncoderId(recordingEncoder));
 
-	const char *quality = recordingQuality == Quality::High
-		? "Small"
-		: "Stream";
+	const char *quality = recordingQuality == Quality::High ? "Small"
+								: "Stream";
 
 	config_set_string(main->Config(), "Output", "Mode", "Simple");
-	config_set_string(main->Config(), "SimpleOutput", "RecQuality", quality);
+	config_set_string(main->Config(), "SimpleOutput", "RecQuality",
+			  quality);
 	config_set_int(main->Config(), "Video", "BaseCX", baseResolutionCX);
 	config_set_int(main->Config(), "Video", "BaseCY", baseResolutionCY);
 	config_set_int(main->Config(), "Video", "OutputCX", idealResolutionCX);
@@ -821,7 +1346,7 @@ void AutoConfig::SaveSettings()
 	if (fpsType != FPSType::UseCurrent) {
 		config_set_uint(main->Config(), "Video", "FPSType", 0);
 		config_set_string(main->Config(), "Video", "FPSCommon",
-				std::to_string(idealFPSNum).c_str());
+				  std::to_string(idealFPSNum).c_str());
 	}
 
 	main->ResetVideo();

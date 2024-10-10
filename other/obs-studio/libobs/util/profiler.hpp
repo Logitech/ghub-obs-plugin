@@ -6,11 +6,7 @@ struct ScopeProfiler {
 	const char *name;
 	bool enabled = true;
 
-	ScopeProfiler(const char *name)
-		: name(name)
-	{
-		profile_start(name);
-	}
+	ScopeProfiler(const char *name) : name(name) { profile_start(name); }
 
 	~ScopeProfiler() { Stop(); }
 
@@ -37,7 +33,7 @@ struct ScopeProfiler {
 
 #ifndef NO_PROFILER_MACROS
 
-#define ScopeProfiler_NameConcatImpl(x, y) x ## y
+#define ScopeProfiler_NameConcatImpl(x, y) x##y
 #define ScopeProfiler_NameConcat(x, y) ScopeProfiler_NameConcatImpl(x, y)
 
 #ifdef __COUNTER__
@@ -46,7 +42,10 @@ struct ScopeProfiler {
 #define ScopeProfiler_Name(x) ScopeProfiler_NameConcat(x, __LINE__)
 #endif
 
-#define ProfileScope(x) ScopeProfiler \
-	ScopeProfiler_Name(SCOPE_PROFILE){x}
+#define ProfileScope(x)                                 \
+	ScopeProfiler ScopeProfiler_Name(SCOPE_PROFILE) \
+	{                                               \
+		x                                       \
+	}
 
 #endif

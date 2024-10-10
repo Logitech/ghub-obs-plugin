@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2014 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,15 +16,24 @@
 ******************************************************************************/
 
 #include <QClipboard>
+#include <QUrl>
+#include <QUrlQuery>
+#include <QDesktopServices>
 #include "window-log-reply.hpp"
 #include "obs-app.hpp"
 
-OBSLogReply::OBSLogReply(QWidget *parent, const QString &url)
-	: QDialog (parent),
-	  ui      (new Ui::OBSLogReply)
+OBSLogReply::OBSLogReply(QWidget *parent, const QString &url, const bool crash)
+	: QDialog(parent),
+	  ui(new Ui::OBSLogReply)
 {
+	setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 	ui->setupUi(this);
 	ui->urlEdit->setText(url);
+	if (crash) {
+		ui->analyzeURL->hide();
+		ui->description->setText(
+			Str("LogReturnDialog.Description.Crash"));
+	}
 
 	installEventFilter(CreateShortcutFilter());
 }
@@ -33,4 +42,14 @@ void OBSLogReply::on_copyURL_clicked()
 {
 	QClipboard *clipboard = QApplication::clipboard();
 	clipboard->setText(ui->urlEdit->text());
+}
+
+void OBSLogReply::on_analyzeURL_clicked()
+{
+	QUrlQuery param;
+	param.addQueryItem("log_url",
+			   QUrl::toPercentEncoding(ui->urlEdit->text()));
+	QUrl url("https://obsproject.com/tools/analyzer", QUrl::TolerantMode);
+	url.setQuery(param);
+	QDesktopServices::openUrl(url);
 }

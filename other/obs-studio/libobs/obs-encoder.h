@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2013-2014 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,7 +29,14 @@
 extern "C" {
 #endif
 
-#define OBS_ENCODER_CAP_DEPRECATED             (1<<0)
+struct obs_encoder;
+typedef struct obs_encoder obs_encoder_t;
+
+#define OBS_ENCODER_CAP_DEPRECATED (1 << 0)
+#define OBS_ENCODER_CAP_PASS_TEXTURE (1 << 1)
+#define OBS_ENCODER_CAP_DYN_BITRATE (1 << 2)
+#define OBS_ENCODER_CAP_INTERNAL (1 << 3)
+#define OBS_ENCODER_CAP_ROI (1 << 4)
 
 /** Specifies the encoder type */
 enum obs_encoder_type {
@@ -39,27 +46,27 @@ enum obs_encoder_type {
 
 /** Encoder output packet */
 struct encoder_packet {
-	uint8_t               *data;        /**< Packet data */
-	size_t                size;         /**< Packet size */
+	uint8_t *data; /**< Packet data */
+	size_t size;   /**< Packet size */
 
-	int64_t               pts;          /**< Presentation timestamp */
-	int64_t               dts;          /**< Decode timestamp */
+	int64_t pts; /**< Presentation timestamp */
+	int64_t dts; /**< Decode timestamp */
 
-	int32_t               timebase_num; /**< Timebase numerator */
-	int32_t               timebase_den; /**< Timebase denominator */
+	int32_t timebase_num; /**< Timebase numerator */
+	int32_t timebase_den; /**< Timebase denominator */
 
-	enum obs_encoder_type type;         /**< Encoder type */
+	enum obs_encoder_type type; /**< Encoder type */
 
-	bool                  keyframe;     /**< Is a keyframe */
+	bool keyframe; /**< Is a keyframe */
 
 	/* ---------------------------------------------------------------- */
 	/* Internal video variables (will be parsed automatically) */
 
 	/* DTS in microseconds */
-	int64_t               dts_usec;
+	int64_t dts_usec;
 
 	/* System DTS in microseconds */
-	int64_t               sys_dts_usec;
+	int64_t sys_dts_usec;
 
 	/**
 	 * Packet priority
@@ -67,7 +74,7 @@ struct encoder_packet {
 	 * This is generally use by video encoders to specify the priority
 	 * of the packet.
 	 */
-	int                   priority;
+	int priority;
 
 	/**
 	 * Dropped packet priority
@@ -75,28 +82,55 @@ struct encoder_packet {
 	 * If this packet needs to be dropped, the next packet must be of this
 	 * priority or higher to continue transmission.
 	 */
-	int                   drop_priority;
+	int drop_priority;
 
 	/** Audio track index (used with outputs) */
-	size_t                track_idx;
+	size_t track_idx;
 
 	/** Encoder from which the track originated from */
-	obs_encoder_t         *encoder;
+	obs_encoder_t *encoder;
 };
 
 /** Encoder input frame */
 struct encoder_frame {
 	/** Data for the frame/audio */
-	uint8_t               *data[MAX_AV_PLANES];
+	uint8_t *data[MAX_AV_PLANES];
 
 	/** size of each plane */
-	uint32_t              linesize[MAX_AV_PLANES];
+	uint32_t linesize[MAX_AV_PLANES];
 
 	/** Number of frames (audio only) */
-	uint32_t              frames;
+	uint32_t frames;
 
 	/** Presentation timestamp */
-	int64_t               pts;
+	int64_t pts;
+};
+
+/** Encoder region of interest */
+struct obs_encoder_roi {
+	/* The rectangle edges of the region are specified as number of pixels
+	 * from the input video's top and left edges (i.e. row/column 0). */
+	uint32_t top;
+	uint32_t bottom;
+	uint32_t left;
+	uint32_t right;
+
+	/* Priority is specified as a float value between -1 and 1.
+	 * These are converted to encoder-specific values by the encoder.
+	 * Values above 0 tell the encoder to increase quality for that region,
+	 * values below tell it to worsen it.
+	 * Not all encoders support negative values and they may be ignored. */
+	float priority;
+};
+
+struct gs_texture;
+
+/** Encoder input texture */
+struct encoder_texture {
+	/** Shared texture handle, only set on Windows */
+	uint32_t handle;
+	/** Textures, length determined by format */
+	struct gs_texture *tex[4];
 };
 
 /**
@@ -160,7 +194,7 @@ struct obs_encoder_info {
 	 * @return                       true if successful, false otherwise.
 	 */
 	bool (*encode)(void *data, struct encoder_frame *frame,
-			struct encoder_packet *packet, bool *received_packet);
+		       struct encoder_packet *packet, bool *received_packet);
 
 	/** Audio encoder only:  Returns the frame size for this encoder */
 	size_t (*get_frame_size)(void *data);
@@ -234,10 +268,41 @@ struct obs_encoder_info {
 	void (*free_type_data)(void *type_data);
 
 	uint32_t caps;
+
+	/**
+	 * Gets the default settings for this encoder
+	 *
+	 * If get_defaults is also defined both will be called, and the first
+	 * call will be to get_defaults, then to get_defaults2.
+	 *
+	 * @param[out]  settings  Data to assign default settings to
+	 * @param[in]   typedata  Type Data
+	 */
+	void (*get_defaults2)(obs_data_t *settings, void *type_data);
+
+	/**
+	 * Gets the property information of this encoder
+	 *
+	 * @param[in]   data      Pointer from create (or null)
+	 * @param[in]   typedata  Type Data
+	 * @return                The properties data
+	 */
+	obs_properties_t *(*get_properties2)(void *data, void *type_data);
+
+	bool (*encode_texture)(void *data, uint32_t handle, int64_t pts,
+			       uint64_t lock_key, uint64_t *next_key,
+			       struct encoder_packet *packet,
+			       bool *received_packet);
+
+	bool (*encode_texture2)(void *data, struct encoder_texture *texture,
+				int64_t pts, uint64_t lock_key,
+				uint64_t *next_key,
+				struct encoder_packet *packet,
+				bool *received_packet);
 };
 
 EXPORT void obs_register_encoder_s(const struct obs_encoder_info *info,
-		size_t size);
+				   size_t size);
 
 /**
  * Register an encoder definition to the current obs context.  This should be

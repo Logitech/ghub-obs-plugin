@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2013 by Hugh Bailey <obs.jim@gmail.com>
+    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -18,22 +18,37 @@
 #pragma once
 
 #include <QDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QCheckBox>
+#include <QDialogButtonBox>
 #include <string>
 #include <memory>
-
-#include "ui_NameDialog.h"
 
 class NameDialog : public QDialog {
 	Q_OBJECT
 
-private:
-	std::unique_ptr<Ui::NameDialog> ui;
-
 public:
 	NameDialog(QWidget *parent);
 
+	// Returns true if user clicks OK, false otherwise
+	// userTextInput returns string that user typed into dialog
 	static bool AskForName(QWidget *parent, const QString &title,
-			const QString &text, std::string &str,
-			const QString &placeHolder = QString(""),
-			int maxSize = 256);
+			       const QString &text, std::string &userTextInput,
+			       const QString &placeHolder = QString(""),
+			       int maxSize = 170);
+
+	// Returns true if user clicks OK, false otherwise
+	// userTextInput returns string that user typed into dialog
+	// userOptionReturn the checkbox was ticked user accepted
+	static bool
+	AskForNameWithOption(QWidget *parent, const QString &title,
+			     const QString &text, std::string &userTextInput,
+			     const QString &optionLabel, bool &optionChecked,
+			     const QString &placeHolder = QString(""));
+
+private:
+	QLabel *label;
+	QLineEdit *userText;
+	QCheckBox *checkbox;
 };

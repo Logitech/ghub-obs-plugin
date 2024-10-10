@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -31,7 +31,7 @@ struct base_allocator {
 	void (*free)(void *);
 };
 
-EXPORT void base_set_allocator(struct base_allocator *defs);
+OBS_DEPRECATED EXPORT void base_set_allocator(struct base_allocator *defs);
 
 EXPORT void *bmalloc(size_t size);
 EXPORT void *brealloc(void *ptr, size_t size);
@@ -57,7 +57,7 @@ static inline char *bstrdup_n(const char *str, size_t n)
 	if (!str)
 		return NULL;
 
-	dup = (char*)bmemdup(str, n+1);
+	dup = (char *)bmemdup(str, n + 1);
 	dup[n] = 0;
 
 	return dup;
@@ -69,7 +69,7 @@ static inline wchar_t *bwstrdup_n(const wchar_t *str, size_t n)
 	if (!str)
 		return NULL;
 
-	dup = (wchar_t*)bmemdup(str, (n+1) * sizeof(wchar_t));
+	dup = (wchar_t *)bmemdup(str, (n + 1) * sizeof(wchar_t));
 	dup[n] = 0;
 
 	return dup;
